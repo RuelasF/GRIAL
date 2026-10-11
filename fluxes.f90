@@ -196,17 +196,21 @@ contains
     real*8 :: pressure_tolerance, state_scale
     logical :: ok, root_is_valid, quadratic_case
 
+#ifndef USE_OPENACC
+    call count_numerical_event(NUM_HLLC_CALLS)
+#endif
+
     if (sweep_dir < DIR_X .or. sweep_dir > DIR_Z .or. alpha <= 0.0d0 .or. &
         sqg <= 0.0d0 .or. .not. ieee_is_finite(alpha) .or. &
         .not. ieee_is_finite(sqg)) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
 
     ! 1. Triedro espacial local: e_(1) es normal a x^d=cte.
     call build_face_orthonormal_frame(g, sweep_dir, frame, coframe, gamma_up_dd, ok)
     if (.not. ok) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
 
@@ -216,12 +220,12 @@ contains
     ! 2. Estados, flujos y ondas acusticas en el marco minkowskiano local.
     call calc_srhd_local_state(q_L_hat, u_L, f_L, lambda_L_min, lambda_L_max, ok)
     if (.not. ok) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
     call calc_srhd_local_state(q_R_hat, u_R, f_R, lambda_R_min, lambda_R_max, ok)
     if (.not. ok) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
 
@@ -231,7 +235,7 @@ contains
 
     if (.not. ieee_is_finite(face_speed) .or. &
         lambda_right - lambda_left <= 1.0d-13) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
 
@@ -239,12 +243,12 @@ contains
     if (face_speed <= lambda_left) then
       call local_flux_to_coordinate(u_L, f_L, face_speed, alpha, sqg, &
                                     gamma_up_dd, coframe, flux_out, ok)
-      if (.not. ok) call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      if (.not. ok) call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     else if (face_speed >= lambda_right) then
       call local_flux_to_coordinate(u_R, f_R, face_speed, alpha, sqg, &
                                     gamma_up_dd, coframe, flux_out, ok)
-      if (.not. ok) call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      if (.not. ok) call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
 
@@ -255,7 +259,7 @@ contains
              lambda_right * lambda_left * (u_R - u_L)) / denom
 
     if (.not. all(ieee_is_finite(u_hll)) .or. .not. all(ieee_is_finite(f_hll))) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
 
@@ -271,7 +275,7 @@ contains
 
     disc_scale = max(tiny(1.0d0), B_quad**2, abs(4.0d0 * A_quad * C_quad))
     if (.not. ieee_is_finite(discriminant) .or. discriminant < -1.0d-12 * disc_scale) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
     discriminant = max(0.0d0, discriminant)
@@ -282,7 +286,7 @@ contains
     quadratic_case = abs(A_quad) > 1.0d-13 * coefficient_scale
     if (.not. quadratic_case) then
       if (abs(B_quad) <= 1.0d-14 * max(tiny(1.0d0), abs(C_quad))) then
-        call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+        call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
         return
       end if
       lambda_star = -C_quad / B_quad
@@ -295,7 +299,7 @@ contains
         denom = -B_quad + sqrt(discriminant)
         if (abs(denom) <= 1.0d-14 * &
             max(tiny(1.0d0), abs(B_quad), sqrt(discriminant))) then
-          call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+          call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
           return
         end if
         lambda_star = (2.0d0 * C_quad) / denom
@@ -319,7 +323,7 @@ contains
     end if
 
     if (.not. root_is_valid) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
     lambda_star = min(lambda_right, max(lambda_left, lambda_star))
@@ -334,14 +338,14 @@ contains
 
     denom = 1.0d0 - lambda_left * lambda_star
     if (abs(denom) <= 1.0d-13) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
     p_star_left = (A_left * lambda_star - B_left) / denom
 
     denom = 1.0d0 - lambda_right * lambda_star
     if (abs(denom) <= 1.0d-13) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
     p_star_right = (A_right * lambda_star - B_right) / denom
@@ -355,14 +359,14 @@ contains
       1.0d2 * epsilon(1.0d0) * state_scale
     if (.not. ieee_is_finite(p_star_left) .or. .not. ieee_is_finite(p_star_right) .or. &
         abs(p_star_left - p_star_right) > pressure_tolerance) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
     p_star = 0.5d0 * (p_star_left + p_star_right)
     if (.not. ieee_is_finite(p_star) .or. &
         abs(lambda_left - lambda_star) <= 1.0d-13 .or. &
         abs(lambda_right - lambda_star) <= 1.0d-13) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
 
@@ -382,7 +386,7 @@ contains
         .not. conservative_state_is_admissible(u_star_R) .or. &
         .not. all(ieee_is_finite(f_star_L)) .or. &
         .not. all(ieee_is_finite(f_star_R))) then
-      call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+      call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
       return
     end if
 
@@ -397,8 +401,19 @@ contains
 
     call local_flux_to_coordinate(u_selected, f_selected, face_speed, alpha, sqg, &
                                   gamma_up_dd, coframe, flux_out, ok)
-    if (.not. ok) call calc_hlle_fluxes(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
+    if (.not. ok) call hllc_fallback_flux(q_L, q_R, sweep_dir, alpha, beta, g, sqg, flux_out)
   end subroutine calc_hllc_fluxes
+
+  subroutine hllc_fallback_flux(q_L,q_R,sweep_dir,alpha,beta,g,sqg,flux_out)
+    !$acc routine seq
+    real*8, intent(in) :: q_L(:),q_R(:),alpha,beta(3),g(3,3),sqg
+    integer, intent(in) :: sweep_dir
+    real*8, intent(out) :: flux_out(:)
+#ifndef USE_OPENACC
+    call count_numerical_event(NUM_HLLC_FALLBACK)
+#endif
+    call calc_hlle_fluxes(q_L,q_R,sweep_dir,alpha,beta,g,sqg,flux_out)
+  end subroutine hllc_fallback_flux
 
   ! Construye una base espacial ortonormal e_(a)^i y su co-base e^(a)_i.
   ! La primera direccion es normal a la superficie coordenada x^d=cte:

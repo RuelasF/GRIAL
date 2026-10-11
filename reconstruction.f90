@@ -291,28 +291,33 @@ contains
   ! Godunov -> TVD -> WENO3 -> MP5/WENO5 del camino CPU.
   subroutine reconstruct_face_state(stencil, face_index, nodes, sweep_dir, method_id, &
                                     limiter_id, shock_sensor_enabled, metric_is_curved, &
-                                    rho_floor_local, p_floor_local, q_left, q_right)
+                                    rho_floor_local, p_floor_local, q_left, q_right, sensor_limits)
     !$acc routine seq
     implicit none
     real*8, intent(in) :: stencil(neq,-2:3)
     integer, intent(in) :: face_index, nodes, sweep_dir, method_id, limiter_id
     logical, intent(in) :: shock_sensor_enabled, metric_is_curved
     real*8, intent(in) :: rho_floor_local, p_floor_local
+    real*8, intent(in) :: sensor_limits(7)
     real*8, intent(out) :: q_left(neq), q_right(neq)
 
     integer :: component
     real*8 :: p_jump, p_min, p_max, rho_jump, rho_min, rho_max
     real*8 :: slope_left_a, slope_left_b, slope_right_a, slope_right_b
     logical :: force_godunov, force_tvd, force_weno3
-    real*8, parameter :: atm_factor = 1.0d2
-    real*8, parameter :: p_tol_tvd = 0.80d0, rho_tol_tvd = 0.50d0
-    real*8, parameter :: p_tol_weno = 0.40d0, rho_tol_weno = 0.15d0
-    real*8, parameter :: p_tol_godunov = 10.0d0, rho_tol_godunov = 10.0d0
+    real*8 :: atm_factor,p_tol_tvd,rho_tol_tvd,p_tol_weno,rho_tol_weno,p_tol_godunov,rho_tol_godunov
 
-    p_max = maxval(stencil(eq_pr,-2:2))
-    p_min = minval(stencil(eq_pr,-2:2))
-    rho_max = maxval(stencil(eq_de,-2:2))
-    rho_min = minval(stencil(eq_de,-2:2))
+    p_tol_weno=sensor_limits(1); rho_tol_weno=sensor_limits(2)
+    p_tol_tvd=sensor_limits(3); rho_tol_tvd=sensor_limits(4)
+    p_tol_godunov=sensor_limits(5); rho_tol_godunov=sensor_limits(6)
+    atm_factor=sensor_limits(7)
+
+    ! Face-centered union of the left/right five-cell reconstruction stencils.
+    ! A single fallback decision must be invariant under swapping both sides.
+    p_max = maxval(stencil(eq_pr,-2:3))
+    p_min = minval(stencil(eq_pr,-2:3))
+    rho_max = maxval(stencil(eq_de,-2:3))
+    rho_min = minval(stencil(eq_de,-2:3))
 
     if (p_max > 1.0d3*p_floor_local) then
       p_jump = (p_max-p_min)/max(p_min,p_floor_local)
@@ -389,29 +394,14 @@ contains
     real*8  :: s_min_L, s_max_L, s_min_R, s_max_R
     real*8  :: p_jump, p_min, p_max
     real*8  :: rho_jump, rho_min, rho_max
-    real*8, parameter :: atm_factor = 1.0d2 ! 100 veces el piso se considera atmósfera
+    real*8 :: atm_factor,p_tol_tvd,rho_tol_tvd,p_tol_weno,rho_tol_weno,p_tol_godunov,rho_tol_godunov
 
-    ! =====================================================================
-    ! CONFIGURACIÓN DEL ESCUDO TÉRMICO (FALLBACK)
-    ! Descomentar el conjunto que se desee utilizar
-    ! =====================================================================
-
-    ! --- CONJUNTO A: Agresivo  ---
-    real*8  :: p_tol_tvd   = 0.80d0  !  80% var. para bajar a TVD
-    real*8  :: rho_tol_tvd = 0.50d0  !  50% var. para bajar a TVD
-    real*8  :: p_tol_weno  = 0.40d0  !  40% var. para bajar a WENO3
-    real*8  :: rho_tol_weno= 0.15d0  !  15% var. para bajar a WENO3
-
-    ! --- CONJUNTO B: Extremo  ---
-    ! real*8  :: p_tol_tvd   = 1.50d0    ! 150% var. para bajar a TVD
-    ! real*8  :: rho_tol_tvd = 0.90d0    !  90% var. para bajar a TVD
-    ! real*8  :: p_tol_weno  = 0.80d0    !  80% var. para bajar a WENO3
-    ! real*8  :: rho_tol_weno= 0.40d0    !  40% var. para bajar a WENO3
-    ! =====================================================================
-
-    ! --- CONJUNTO C: Acantilado de Vacío ---
-    real*8  :: p_tol_godunov   = 10.0d0  ! Salto > 1000% -> Godunov puro
-    real*8  :: rho_tol_godunov = 10.0d0
+    ! Parámetros compartidos con la variante por caras; no editar fuente
+    ! para comparar sensores. Los valores predeterminados siguen siendo A.
+    p_tol_weno=shock_sensor_thresholds(1); rho_tol_weno=shock_sensor_thresholds(2)
+    p_tol_tvd=shock_sensor_thresholds(3); rho_tol_tvd=shock_sensor_thresholds(4)
+    p_tol_godunov=shock_sensor_thresholds(5); rho_tol_godunov=shock_sensor_thresholds(6)
+    atm_factor=shock_sensor_thresholds(7)
 
     select case(rec_method_id)
 
@@ -430,13 +420,13 @@ contains
       !$OMP PARALLEL DO PRIVATE(k, i, s_min_L, s_max_L, s_min_R, s_max_R, p_max, p_min, p_jump, rho_max, rho_min, rho_jump)
         do i = 0, nodes
           p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
-                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2))
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
           p_min = min(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
-                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2))
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
           rho_max = max(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
-                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2))
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
           rho_min = min(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
-                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2))
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
 
           if (p_max > 1.0d3 * p_floor) then
             p_jump = (p_max - p_min) / max(p_min, p_floor)
@@ -496,13 +486,13 @@ contains
         do i = 0, nodes
 
           p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
-                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2))
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
           p_min = min(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
-                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2))
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
           rho_max = max(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
-                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2))
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
           rho_min = min(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
-                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2))
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
 
           if (p_max > 1.0d3 * p_floor) then
             p_jump = (p_max - p_min) / max(p_min, p_floor)
@@ -573,14 +563,14 @@ contains
         do i = 0, nodes
 
           p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
-                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2))
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
           p_min = min(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
-                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2))
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
 
           rho_max = max(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
-                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2))
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
           rho_min = min(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
-                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2))
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
 
           ! Evaluar el salto solo si hay material real
           if (p_max > 1.0d3 * p_floor) then
@@ -657,14 +647,14 @@ contains
         do i = 0, nodes
 
           p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
-                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2))
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
           p_min = min(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
-                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2))
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
 
           rho_max = max(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
-                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2))
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
           rho_min = min(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
-                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2))
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
 
           ! Evaluar el salto solo si hay material real
           if (p_max > 1.0d3 * p_floor) then
@@ -742,6 +732,10 @@ contains
 
     end select
 
+    ! Observa la política aplicada por el backend CPU antes de sus floors.
+    if (do_numerical_diagnostics) call audit_reconstruction_strip(prim_1d,nodes,sweep_dir, &
+      q_L,q_R,p_tol_tvd,rho_tol_tvd,p_tol_weno,rho_tol_weno,p_tol_godunov,rho_tol_godunov)
+
     ! Escudo de positividad absoluta
     !$OMP PARALLEL DO PRIVATE(i)
     do i = 0, nodes
@@ -753,5 +747,51 @@ contains
     !$OMP END PARALLEL DO
 
   end subroutine reconstruct_1d_core
+
+  subroutine audit_reconstruction_strip(prim,nodes,direction,left,right,pt,rt,pw,rw,pg,rg)
+    integer, intent(in) :: nodes,direction
+    real*8, intent(in) :: prim(neq,-nghost:nodes+nghost),left(neq,0:nodes),right(neq,0:nodes)
+    real*8, intent(in) :: pt,rt,pw,rw,pg,rg
+    integer :: face,method,event
+    integer(int64) :: counts(7)
+    real*8 :: pmin,pmax,rmin,rmax,jp,jr
+    logical :: radial_edge,near_geometry
+    counts=0_int64
+    do face=0,nodes
+      method=rec_method_id
+      radial_edge=trim(metric_type) /= 'Minkowski' .and. direction == DIR_X .and. face <= 0
+      if (method /= REC_GODUNOV .and. use_shock_sensor) then
+        pmin=minval(prim(eq_pr,face-2:face+3))
+        pmax=maxval(prim(eq_pr,face-2:face+3))
+        rmin=minval(prim(eq_de,face-2:face+3))
+        rmax=maxval(prim(eq_de,face-2:face+3))
+        jp=0.0d0
+        jr=0.0d0
+        if (pmax > 1.0d3*p_floor) jp=(pmax-pmin)/max(pmin,p_floor)
+        if (rmax > 1.0d3*rho_floor) jr=(rmax-rmin)/max(rmin,rho_floor)
+        near_geometry=rec_method_id == REC_MP5 .and. trim(metric_type) /= 'Minkowski' .and. &
+          ((direction == DIR_X .and. face <= 3) .or. &
+           (direction == DIR_Y .and. (face <= 2 .or. face >= nodes-2)))
+        if (radial_edge .or. min(prim(eq_de,face),prim(eq_de,face+1)) <= shock_sensor_thresholds(7)*rho_floor .or. &
+            jp >= pg .or. jr >= rg) then
+          method=REC_GODUNOV
+        else if (rec_method_id >= REC_WENO3 .and. (jp >= pt .or. jr >= rt)) then
+          method=REC_TVD
+        else if (rec_method_id >= REC_MP5 .and. (jp >= pw .or. jr >= rw .or. near_geometry)) then
+          method=REC_WENO3
+        end if
+      else if (rec_method_id >= REC_WENO3 .and. radial_edge) then
+        method=REC_GODUNOV
+      end if
+      counts(method)=counts(method)+1_int64
+      if (left(eq_de,face) < rho_floor) counts(6)=counts(6)+1_int64
+      if (right(eq_de,face) < rho_floor) counts(6)=counts(6)+1_int64
+      if (left(eq_pr,face) < p_floor) counts(7)=counts(7)+1_int64
+      if (right(eq_pr,face) < p_floor) counts(7)=counts(7)+1_int64
+    end do
+    do event=1,7
+      call count_numerical_event(event,counts(event))
+    end do
+  end subroutine audit_reconstruction_strip
 
 end module reconstruction

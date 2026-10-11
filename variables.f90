@@ -15,6 +15,7 @@
 ! =================================================================================
 
 module variables
+    use, intrinsic :: iso_fortran_env, only: int64
     implicit none
     public
 
@@ -45,6 +46,11 @@ module variables
     real*8  :: integration_time             ! Tiempo actual de la simulación
     real*8  :: CFL                          ! Número de Courant-Friedrichs-Lewy
     integer :: n_steps = 0                  ! Contador total de pasos evaluados
+
+    ! CPU radial Michel budget; reset per process, without changing evolution.
+    logical :: do_radial_mass_budget = .false.
+    real*8 :: radial_mass_flux(2) = 0.0d0
+    real*8 :: radial_mass_initial = 0.0d0, radial_mass_flux_integral(2) = 0.0d0
 
     ! ==========================================================
     ! ARREGLOS GEOMÉTRICOS DE LA MALLA (1D Arrays)
@@ -130,6 +136,10 @@ module variables
 
     logical :: is_mhd = .false.                  ! Campos B (Futuro)
     logical :: use_shock_sensor = .true.         ! Fallback reconstrucción
+    ! WENO3: presión/densidad; TVD: presión/densidad; Godunov: presión/densidad;
+    ! factor de atmósfera. A conserva exactamente los valores históricos.
+    real*8, parameter :: SENSOR_DEFAULTS(7) = [0.40d0,0.15d0,0.80d0,0.50d0,10.0d0,10.0d0,100.0d0]
+    real*8 :: shock_sensor_thresholds(7) = SENSOR_DEFAULTS
 
     ! Banderas numéricas para los kernels. Evitan comparar cadenas y usar
     ! punteros a procedimientos dentro del dispositivo OpenACC.
@@ -148,6 +158,19 @@ module variables
     logical :: do_mdot_extraction = .false.      ! Extracción de tasa de acreción
     logical :: do_gw_extraction = .false.        ! Extracción de ondas gravitacionales
     logical :: do_ppi_diagnostics = .false.      ! Modos azimutales y estado global
+
+    ! Diagnóstico opcional CPU. Contadores acumulados por sesión, incluidos
+    ! los tres subpasos RK y las caras de frontera; desactivado por defecto.
+    logical :: do_numerical_diagnostics = .false.
+    integer, parameter :: NUM_RECON_GODUNOV=1, NUM_RECON_TVD=2, NUM_RECON_WENO3=3
+    integer, parameter :: NUM_RECON_MP5=4, NUM_RECON_WENO5=5
+    integer, parameter :: NUM_FACE_RHO_FLOOR=6, NUM_FACE_P_FLOOR=7
+    integer, parameter :: NUM_C2P_CALLS=8, NUM_C2P_LOW_D=9, NUM_C2P_MOMENTUM=10
+    integer, parameter :: NUM_C2P_ROOT_FAIL=11, NUM_C2P_BAD_V=12, NUM_C2P_SANITIZE=13
+    integer, parameter :: NUM_P2C_VELOCITY_CAP=14, NUM_HLLC_CALLS=15, NUM_HLLC_FALLBACK=16
+    integer, parameter :: NUM_EVENT_COUNT=16
+    integer(int64) :: numerical_events(NUM_EVENT_COUNT)=0_int64
+    real*8 :: numerical_delta_u(neq)=0.0d0
 
     ! Control reproducible de perturbaciones para toros de Fishbone--Moncrief.
     integer, parameter :: PERT_NONE = 0
@@ -298,6 +321,28 @@ module variables
     !$acc declare create(alpha_f_z,beta_f_z,gamma_f_z,sqrt_gamma_f_z)
 
 contains
+
+    subroutine count_numerical_event(event, amount)
+        integer, intent(in) :: event
+        integer(int64), intent(in), optional :: amount
+        integer(int64) :: increment
+        if (.not. do_numerical_diagnostics) return
+        increment=1_int64
+        if (present(amount)) increment=amount
+        !$omp atomic update
+        numerical_events(event)=numerical_events(event)+increment
+    end subroutine count_numerical_event
+
+    subroutine record_numerical_change(before, after)
+        real*8, intent(in) :: before(:), after(:)
+        integer :: component
+        if (.not. do_numerical_diagnostics) return
+        if (all(before == after)) return
+        do component=1,neq
+            !$omp atomic update
+            numerical_delta_u(component)=numerical_delta_u(component)+(after(component)-before(component))
+        end do
+    end subroutine record_numerical_change
 
   pure logical function is_polar_geometry(geometry_name)
     character(len=*), intent(in) :: geometry_name

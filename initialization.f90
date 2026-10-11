@@ -54,6 +54,13 @@ contains
       error stop 1
     end select
 
+    ! The five-cell sensor reads i-2 at face i=0. Boundary filling writes
+    ! 1-nghost:0, so nghost=2 leaves index -2 stale even though it is allocated.
+    ! TVD/WENO3 without the sensor only need two *filled* layers.
+    if (use_shock_sensor .and. rec_method_id /= REC_GODUNOV) nghost=max(nghost,3)
+    ! The generic device stencil loads -2:2 for every reconstruction method.
+    if (accelerator_enabled) nghost=max(nghost,3)
+
     select case(riemann_solver_id)
     case(RS_HLLE)
       solver_name = 'hlle'

@@ -3,7 +3,9 @@ program test_output_paths
   use output
   implicit none
 
-  integer :: i
+  integer :: i,unit_file,time_index
+  real*8 :: stored_time
+  character(len=120) :: title
   logical :: file_exists
   character(len=*), parameter :: test_directory = &
     '/tmp/grhd_output_path_test/123456789012345678901234567890123456789012345678901234567890'
@@ -21,6 +23,7 @@ program test_output_paths
   metric_type = 'Minkowski'
   a_spin = 0.0d0
   save_interval = 1.0d0
+  integration_time = 0.125d0
   output_prefix = long_prefix
   output_folder = test_directory
   scheme_name = 'weno5_superbee_hlle'
@@ -61,6 +64,14 @@ program test_output_paths
     write(*,'(A)') 'OUTPUT PATH TEST FAILED: long VTK name was not created'
     error stop 1
   end if
+  open(newunit=unit_file,file=expected_file,status='old',access='stream',form='formatted')
+  read(unit_file,'(A)') title
+  read(unit_file,'(A)') title
+  close(unit_file)
+  time_index=index(title,'t=')
+  if (time_index == 0) error stop 'VTK actual physical time missing'
+  read(title(time_index+2:),*) stored_time
+  if (abs(stored_time-integration_time) > 1.0d-14) error stop 'VTK physical time differs from integration_time'
 
   call execute_command_line('rm -f '//expected_file)
   call execute_command_line('rmdir '//test_directory//'/'//trim(scheme_name))

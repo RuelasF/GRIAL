@@ -21,6 +21,8 @@ module output
             initialize_auxiliary_output, calc_ppi_modes, calc_global_diagnostics, &
             write_perturbation_event, finn_evans_cell_stress, gw_cartesian_kinematics, &
             kerr_schild_spheroidal_position
+  public :: initialize_numerical_output, write_numerical_diagnostics
+  public :: initialize_radial_mass_output, accumulate_radial_mass_budget
 
   ! La extracción Finn--Evans es un proxy de campo débil evaluado sobre el
   ! fluido GRHD. La distancia está expresada en las unidades geométricas del
@@ -31,6 +33,71 @@ module output
   logical :: checkpoint_uses_soa_layout = .false.
 
 contains
+
+  subroutine initialize_radial_mass_output()
+    integer :: unit_file
+    character(len=512) :: path
+    do_radial_mass_budget = do_numerical_diagnostics .and. .not. accelerator_enabled .and. &
+      trim(case_name) == 'MichelA' .and. ny == 1 .and. nz == 1
+    if (.not. do_radial_mass_budget) return
+    radial_mass_initial = sum(up(:,:,:,eq_de))*dx*dy*dz
+    radial_mass_flux_integral = 0.0d0
+    path=trim(output_folder)//'/'//trim(scheme_name)//'/radial_mass_budget.dat'
+    call initialize_text_file(path, &
+      '# time steps mass initial_mass integral_F_left integral_F_right residual',.not. do_restart)
+    open(newunit=unit_file,file=trim(path),position='append',action='write')
+    write(unit_file,'(A,ES24.16E3)') '# flux integrals reset per session; initial t=',integration_time
+    write(unit_file,'(A)') '# F points towards increasing logical radius; residual=M-M0-(I_left-I_right)'
+    close(unit_file)
+  end subroutine initialize_radial_mass_output
+
+  subroutine accumulate_radial_mass_budget(rk_stage)
+    integer, intent(in) :: rk_stage
+    real*8, parameter :: weights(3) = [1.0d0/6.0d0,1.0d0/6.0d0,2.0d0/3.0d0]
+    radial_mass_flux_integral = radial_mass_flux_integral+dt*weights(rk_stage)*radial_mass_flux
+  end subroutine accumulate_radial_mass_budget
+
+  subroutine write_radial_mass_budget()
+    integer :: unit_file
+    real*8 :: mass, residual
+    character(len=512) :: path
+    mass = sum(up(:,:,:,eq_de))*dx*dy*dz
+    residual = mass-radial_mass_initial-(radial_mass_flux_integral(1)-radial_mass_flux_integral(2))
+    path=trim(output_folder)//'/'//trim(scheme_name)//'/radial_mass_budget.dat'
+    open(newunit=unit_file,file=trim(path),position='append',action='write')
+    write(unit_file,'(ES24.16E3,1X,I0,5(1X,ES24.16E3))') integration_time,n_steps, &
+      mass,radial_mass_initial,radial_mass_flux_integral,residual
+    close(unit_file)
+  end subroutine write_radial_mass_budget
+
+  subroutine initialize_numerical_output()
+    integer :: unit_file
+    character(len=512) :: path
+    if (.not. do_numerical_diagnostics) return
+    path=trim(output_folder)//'/'//trim(scheme_name)//'/numerical_diagnostics.dat'
+    call initialize_text_file(path, &
+      '# time steps recon_godunov recon_tvd recon_weno3 recon_mp5 recon_weno5 face_rho_floor face_p_floor '// &
+      'c2p_calls c2p_low_D c2p_momentum_clip c2p_root_fail c2p_bad_V c2p_sanitize p2c_velocity_cap '// &
+      'hllc_calls hllc_fallback raw_delta_D raw_delta_tau raw_delta_Sx raw_delta_Sy raw_delta_Sz',.not. do_restart)
+    open(newunit=unit_file,file=trim(path),position='append',action='write')
+    write(unit_file,'(A,ES24.16E3)') '# CPU counters reset per process; session starts at t=',integration_time
+    write(unit_file,'(A)') '# recon counts include boundary faces and all RK stages; floors count states L/R'
+    write(unit_file,'(A)') '# raw_delta sums C2P changes times logical cell volume; no RK weighting or boundary-flux budget'
+    close(unit_file)
+    call write_numerical_diagnostics()
+  end subroutine initialize_numerical_output
+
+  subroutine write_numerical_diagnostics()
+    integer :: unit_file
+    character(len=512) :: path
+    if (.not. do_numerical_diagnostics) return
+    path=trim(output_folder)//'/'//trim(scheme_name)//'/numerical_diagnostics.dat'
+    open(newunit=unit_file,file=trim(path),position='append',action='write')
+    write(unit_file,'(ES24.16E3,1X,I0,16(1X,I0),5(1X,ES24.16E3))') &
+      integration_time,n_steps,numerical_events,numerical_delta_u*dx*dy*dz
+    close(unit_file)
+    if (do_radial_mass_budget) call write_radial_mass_budget()
+  end subroutine write_numerical_diagnostics
 
   subroutine initialize_text_file(file_name, header, replace_existing)
     character(len=*), intent(in) :: file_name, header
@@ -80,6 +147,11 @@ contains
     write(unit_file, '(A,ES24.16E3)') 'final_time=', final_time
     write(unit_file, '(A,ES24.16E3)') 'cfl=', CFL
     write(unit_file, '(A,L1)') 'ppi_diagnostics=', do_ppi_diagnostics
+    write(unit_file, '(A,L1)') 'numerical_diagnostics=', do_numerical_diagnostics
+    write(unit_file, '(A,L1)') 'shock_sensor=', use_shock_sensor
+    write(unit_file, '(A)') 'shock_sensor_stencil=face_centered_i_minus_2_to_i_plus_3'
+    write(unit_file, '(A,7(ES24.16E3,1X))') 'sensor_weno3_p_rho_tvd_p_rho_godunov_p_rho_atmosphere=', &
+                                         shock_sensor_thresholds
     write(unit_file, '(A,I0)') 'diagnostic_stride=', diagnostic_stride
     write(unit_file, '(A,I0)') 'extraction_stride=', extraction_stride
     write(unit_file, '(A,I0)') 'mass_monitor_stride=', mass_monitor_stride
@@ -144,6 +216,11 @@ contains
       file_name = trim(directory) // '/perturbation_events.dat'
       call initialize_text_file(file_name, &
         '# t type seed amplitude mode', replace_existing)
+      if (trim(case_name) == 'KHI') then
+        file_name = trim(directory) // '/khi_diagnostics.dat'
+        call initialize_text_file(file_name, &
+          '# t D_total tau_total Sx_total Sy_total Sz_total mode_plus mode_minus Kz_proxy', replace_existing)
+      end if
     end if
 
     call write_run_manifest()
@@ -204,7 +281,8 @@ contains
     end if
 
     write(unit_file) '# vtk DataFile Version 3.0' // char(10)
-    write(unit_file) 'GRHD Simulation Data' // char(10)
+    write(header_line,'(A,ES24.16E3)') 'GRHD Simulation Data t=',integration_time
+    write(unit_file) trim(header_line) // char(10)
     write(unit_file) 'BINARY' // char(10)
     write(unit_file) 'DATASET STRUCTURED_GRID' // char(10)
 
@@ -373,7 +451,8 @@ contains
     end if
 
     write(unit_file) '# vtk DataFile Version 3.0' // char(10)
-    write(unit_file) 'GRHD Simulation Data' // char(10)
+    write(header_line,'(A,ES24.16E3)') 'GRHD Simulation Data t=',integration_time
+    write(unit_file) trim(header_line) // char(10)
     write(unit_file) 'BINARY' // char(10)
     write(unit_file) 'DATASET UNSTRUCTURED_GRID' // char(10)
     write(header_line, '(a, i0, a)') 'POINTS ', n_points, ' double'
@@ -478,7 +557,7 @@ contains
     real*8, intent(in) :: current_time
     integer :: unit_file, io_status
     character(len=512) :: file_name
-    character(len=12), parameter :: checkpoint_magic = 'GRHDCP_V5'
+    character(len=12), parameter :: checkpoint_magic = 'GRHDCP_V6'
 
     write(file_name, '(A, "/checkpoint_", A, "_step_", I9.9, ".rst")') &
       trim(output_folder), trim(scheme_name), step_num
@@ -518,6 +597,8 @@ contains
       write(unit_file) apply_perturbation, perturbation_applied
       write(unit_file) perturbation_type, perturbation_seed, diagnostic_stride
       write(unit_file) perturbation_time, perturbation_amplitude, perturbation_mode
+      ! V6 añade umbrales; evita reanudar una corrida B silenciosamente con A.
+      write(unit_file) shock_sensor_thresholds
 
       ! Estado temporal de la simulación
       write(unit_file) current_time
@@ -534,20 +615,22 @@ contains
   subroutine read_checkpoint_metadata(unit_file)
     integer, intent(in) :: unit_file
     integer :: io_status
-    logical :: is_v2, is_v3, is_v4, is_v5, is_versioned
+    logical :: is_v2, is_v3, is_v4, is_v5, is_v6, is_versioned
     character(len=12) :: checkpoint_magic
     character(len=12), parameter :: checkpoint_magic_v2 = 'GRHDCP_V2'
     character(len=12), parameter :: checkpoint_magic_v3 = 'GRHDCP_V3'
     character(len=12), parameter :: checkpoint_magic_v4 = 'GRHDCP_V4'
     character(len=12), parameter :: checkpoint_magic_v5 = 'GRHDCP_V5'
+    character(len=12), parameter :: checkpoint_magic_v6 = 'GRHDCP_V6'
 
     read(unit_file, iostat=io_status) checkpoint_magic
     is_v2 = (io_status == 0 .and. checkpoint_magic == checkpoint_magic_v2)
     is_v3 = (io_status == 0 .and. checkpoint_magic == checkpoint_magic_v3)
     is_v4 = (io_status == 0 .and. checkpoint_magic == checkpoint_magic_v4)
     is_v5 = (io_status == 0 .and. checkpoint_magic == checkpoint_magic_v5)
-    is_versioned = is_v2 .or. is_v3 .or. is_v4 .or. is_v5
-    checkpoint_uses_soa_layout = is_v5
+    is_v6 = (io_status == 0 .and. checkpoint_magic == checkpoint_magic_v6)
+    is_versioned = is_v2 .or. is_v3 .or. is_v4 .or. is_v5 .or. is_v6
+    checkpoint_uses_soa_layout = is_v5 .or. is_v6
     if (.not. is_versioned) rewind(unit_file)
 
     ! Topología de malla
@@ -564,7 +647,7 @@ contains
       a_spin = 0.0d0
       print *, 'WARNING: legacy checkpoint has no Kerr spin; assuming a = 0.'
     end if
-    if (is_v3 .or. is_v4 .or. is_v5) then
+    if (is_v3 .or. is_v4 .or. is_v5 .or. is_v6) then
       read(unit_file) use_log_r, use_shock_sensor, do_gw_extraction, &
                       do_mdot_extraction, do_ppi_diagnostics
     else
@@ -581,19 +664,21 @@ contains
     read(unit_file) case_id, case_name, scheme_name
     read(unit_file) rec_method_id, tvd_limiter_id, riemann_solver_id
 
-    if (is_v4 .or. is_v5) then
+    if (is_v4 .or. is_v5 .or. is_v6) then
       call read_checkpoint_initial_parameters(unit_file)
     else if (case_id == 5 .or. case_id == 7 .or. case_id == 8) then
       write(*,'(A)') 'WARNING: legacy checkpoint lacks case-specific boundary parameters; using defaults.'
     end if
 
-    if (is_v3 .or. is_v4 .or. is_v5) then
+    if (is_v3 .or. is_v4 .or. is_v5 .or. is_v6) then
       read(unit_file) apply_perturbation, perturbation_applied
       read(unit_file) perturbation_type, perturbation_seed, diagnostic_stride
       read(unit_file) perturbation_time, perturbation_amplitude, perturbation_mode
     else
       perturbation_applied = .false.
     end if
+    shock_sensor_thresholds = SENSOR_DEFAULTS
+    if (is_v6) read(unit_file) shock_sensor_thresholds
   end subroutine read_checkpoint_metadata
 
   subroutine read_checkpoint_state(unit_file, step_num, current_time)
@@ -1144,7 +1229,49 @@ contains
       angular_momentum, rho_minimum, pressure_minimum, rho_maximum, pressure_maximum, &
       max_velocity_squared, atmosphere_cells, invalid_cells
     close(unit_file)
+    if (trim(case_name) == 'KHI') call calc_khi_diagnostics(current_time)
   end subroutine calc_global_diagnostics
+
+  ! Caja periódica SRHD: balances de las variables realmente evolucionadas
+  ! y amplitud del modo sembrado en cada interfaz original. Kz es un proxy
+  ! transversal, no una descomposición covariante de la energía cinética.
+  subroutine calc_khi_diagnostics(current_time)
+    real*8, intent(in) :: current_time
+    integer :: i,k,m,unit_file
+    real*8 :: totals(neq),volume,phase,cx(nx),sx(nx),wp(nz),wm(nz)
+    real*8 :: rp,ip,rm,im,vz,rho,pres,v2,Kz,enthalpy,amp_plus,amp_minus
+    character(len=512) :: file_name
+    if (trim(case_name) /= 'KHI' .or. ny /= 1 .or. trim(metric_type) /= 'Minkowski') return
+    volume=dx*dy*dz
+    totals=0.0d0; rp=0.0d0; ip=0.0d0; rm=0.0d0; im=0.0d0; Kz=0.0d0
+    do i=1,nx
+      phase=khi_perturbation_wave_number*pi*x(i)
+      cx(i)=cos(phase); sx(i)=sin(phase)
+    end do
+    do k=1,nz
+      wp(k)=exp(-0.5d0*((z(k)-khi_half_width)/khi_perturbation_width)**2)
+      wm(k)=exp(-0.5d0*((z(k)+khi_half_width)/khi_perturbation_width)**2)
+      do i=1,nx
+        do m=1,neq
+          totals(m)=totals(m)+up(i,1,k,m)*volume
+        end do
+        vz=p(i,1,k,eq_vz)
+        rp=rp+vz*cx(i)*wp(k); ip=ip-vz*sx(i)*wp(k)
+        rm=rm+vz*cx(i)*wm(k); im=im-vz*sx(i)*wm(k)
+        rho=p(i,1,k,eq_de); pres=p(i,1,k,eq_pr)
+        v2=sum(p(i,1,k,eq_vx:eq_vz)**2)
+        enthalpy=rho+g1*pres
+        Kz=Kz+0.5d0*enthalpy*vz*vz/max(1.0d0-v2,tiny(1.0d0))*volume
+      end do
+    end do
+    amp_plus=2.0d0*sqrt(rp*rp+ip*ip)/(dble(nx)*sum(wp))
+    amp_minus=2.0d0*sqrt(rm*rm+im*im)/(dble(nx)*sum(wm))
+    file_name=trim(output_folder)//'/'//trim(scheme_name)//'/khi_diagnostics.dat'
+    open(newunit=unit_file,file=trim(file_name),status='unknown',position='append',action='write')
+    write(unit_file,'(9(ES24.16E3,1X))') current_time,totals(eq_de),totals(eq_pr), &
+      totals(eq_vx),totals(eq_vy),totals(eq_vz),amp_plus,amp_minus,Kz
+    close(unit_file)
+  end subroutine calc_khi_diagnostics
 
 
   subroutine write_perturbation_event(current_time)

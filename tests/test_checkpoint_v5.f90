@@ -78,6 +78,7 @@ program test_checkpoint_v5
   dust_accretion_constant = -0.765d0
   offaxis_radial_center = 12.75d0
   fm_polytropic_constant = 0.00234d0
+  shock_sensor_thresholds = [0.80d0,0.40d0,1.50d0,0.90d0,10.0d0,10.0d0,100.0d0]
 
   call save_checkpoint(73, 12.5d0)
 
@@ -100,6 +101,7 @@ program test_checkpoint_v5
   dust_accretion_constant = 1.0d0
   offaxis_radial_center = -1.0d0
   fm_polytropic_constant = -1.0d0
+  shock_sensor_thresholds = SENSOR_DEFAULTS
 
   open(newunit=unit_file,file=checkpoint_file,status='old',form='unformatted',action='read')
   call read_checkpoint_metadata(unit_file)
@@ -126,12 +128,43 @@ program test_checkpoint_v5
   call assert_close('Dust constant', dust_accretion_constant, -0.765d0, failures)
   call assert_close('OffAxis center', offaxis_radial_center, 12.75d0, failures)
   call assert_close('FM parameter', fm_polytropic_constant, 0.00234d0, failures)
+  call assert_close('sensor B WENO3 pressure', shock_sensor_thresholds(1), 0.80d0, failures)
+  call assert_close('sensor B TVD density', shock_sensor_thresholds(4), 0.90d0, failures)
   if (any(up /= expected_state)) then
     failures = failures + 1
     write(*,'(A)') 'FAIL conserved state round trip'
   end if
 
-  call execute_command_line('rm -f '//checkpoint_file)
+  ! Sintetizar V5 con su secuencia original de registros: compatible con
+  ! estados SoA antiguos y umbrales A implícitos, sin leer un registro de más.
+  open(newunit=unit_file,file=checkpoint_file,status='replace',form='unformatted')
+  write(unit_file) 'GRHDCP_V5   '
+  write(unit_file) nghost,nx,ny,nz
+  write(unit_file) r_min,r_max,y_min,y_max,z_min,z_max
+  write(unit_file) bh_mass,adb_idx,a_spin
+  write(unit_file) use_log_r,use_shock_sensor,do_gw_extraction,do_mdot_extraction,do_ppi_diagnostics
+  write(unit_file) metric_type,geom_type
+  write(unit_file) final_time,CFL,save_interval
+  write(unit_file) output_prefix,output_folder
+  write(unit_file) case_id,case_name,scheme_name
+  write(unit_file) rec_method_id,tvd_limiter_id,riemann_solver_id
+  call write_checkpoint_initial_parameters(unit_file)
+  write(unit_file) apply_perturbation,perturbation_applied
+  write(unit_file) perturbation_type,perturbation_seed,diagnostic_stride
+  write(unit_file) perturbation_time,perturbation_amplitude,perturbation_mode
+  write(unit_file) 12.5d0
+  write(unit_file) 73
+  write(unit_file) expected_state
+  close(unit_file)
+  up=-1.0d0
+  open(newunit=unit_file,file=checkpoint_file,status='old',form='unformatted')
+  call read_checkpoint_metadata(unit_file)
+  call read_checkpoint_state(unit_file,step_read,time_read)
+  close(unit_file,status='delete')
+  if (any(shock_sensor_thresholds /= SENSOR_DEFAULTS) .or. any(up /= expected_state)) &
+    error stop 'legacy V5 sensor defaults/state mismatch'
+  call assert_close('V5 time',time_read,12.5d0,failures)
+  call assert_integer('V5 steps',step_read,73,failures)
   call execute_command_line('rmdir '//test_directory)
   deallocate(up,expected_state)
 
@@ -139,7 +172,7 @@ program test_checkpoint_v5
     write(*,'(A,I0)') 'CHECKPOINT V5 TESTS FAILED: ', failures
     error stop 1
   end if
-  write(*,'(A)') 'CHECKPOINT V5 TESTS PASSED'
+  write(*,'(A)') 'CHECKPOINT V5/V6 TESTS PASSED'
 
 contains
 

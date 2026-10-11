@@ -73,6 +73,10 @@ program grhd2
     end if
     call read_checkpoint_metadata(20)
     call read_parameter_file(trim(parameter_file), .true.)
+    ! Checkpoints store only physical conserved cells. Re-derive ghost depth
+    ! so a historical TVD/WENO3 checkpoint cannot restore an insufficient
+    ! filled stencil after the five-cell sensor boundary correction.
+    call choose_numerical_architecture()
     call validate_parameters(trim(parameter_file))
     call print_parameter_summary(trim(parameter_file))
     if (check_only) then
@@ -140,6 +144,8 @@ program grhd2
   call initialize_rhs_accelerator()
 
   call initialize_auxiliary_output(.not. do_restart)
+  call initialize_radial_mass_output()
+  call initialize_numerical_output()
   if (do_gw_extraction) call calc_gw_strain(integration_time)
   if (do_mdot_extraction) call calc_m_dot(integration_time)
   if (do_ppi_diagnostics) then
@@ -258,6 +264,7 @@ program grhd2
 
       ! A. Integración Espacial: Reconstrucción, Flujos y Términos Fuente
       call calc_rhs(p, rhs)
+      if (do_radial_mass_budget) call accumulate_radial_mass_budget(rk)
 
       ! B. Avance Temporal Low-Storage
       ! (Las operaciones matriciales vectorizadas funcionan sin bucles for)
@@ -317,6 +324,8 @@ program grhd2
       call calc_ppi_modes(integration_time)
       call calc_global_diagnostics(integration_time)
     end if
+    if (do_numerical_diagnostics .and. mod(n_steps,diagnostic_stride) == 0) &
+      call write_numerical_diagnostics()
 
     ! --- CONSERVACIÓN DE MASA GLOBAL ---
     if (mass_monitor_stride > 0) then
@@ -400,6 +409,8 @@ program grhd2
   end if
 
   ! Evaluación final de errores L1/L2 si corresponde al test
+  if (do_numerical_diagnostics .and. mod(n_steps,diagnostic_stride) /= 0) &
+    call write_numerical_diagnostics()
   call accelerator_update_host()
   call calc_convergence_norms()
 

@@ -11,7 +11,14 @@ tests/test_multidimensional_cfl
 tests/test_minkowski_spherical
 tests/test_case_corrections
 tests/test_checkpoint_v4
+tests/test_checkpoint_v5
 tests/test_output_paths
+tests/test_accelerator_reconstruction
+tests/test_accelerator_rhs
+tests/test_numerical_diagnostics
+tests/test_spatial_order
+tests/test_sensor_boundaries
+tests/test_sensor_symmetry
 
 # --- Resultados y Checkpoints de Simulación ---
 *.dat
@@ -23,6 +30,8 @@ tests/test_output_paths
 *.sh
 !inundaciones.sh
 !inundaciones_weno3.sh
+!submit_ppi_weno3.sh
+!submit_jet_openmp_scaling.sh
 *.py
 *.md
 !README.md
@@ -55,9 +64,20 @@ AdvectedWave_*/
 EFKS_comparison_logs_and_figures/
 .validation/
 .benchmark/
+slurm_logs/
+ppi_weno3_800_t5000/
+ppi_weno3_smoke/
+ppi_weno3_*x1x*_t5000/
+jet_openmp_scaling/
+ppi_sensor_mp5_weno5_*/
+analysis/*/raw/
+analysis/*/extracted/
+analysis/*/figures/
 
 # --- Scripts auxiliares y Otros ---
 *.sample
 __pycache__/
+tests/test_khi_diagnostics
+tests/test_michel_initial
 nohup.out
 log_*.txt

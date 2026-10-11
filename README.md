@@ -171,6 +171,8 @@ Las claves internas `y_min`, `y_max`, `z_min` y `z_max` se leen directamente en 
 | `fishbone_sagittal` | Corte FM en `r-theta` | EF esférica | Escala nominal hasta `t=100`; toro EF emparejado hasta una órbita |
 | `fishbone_3d` | Toro FM con tres direcciones activas | EF esférica o KS esferoidal | Escala nominal hasta `t=35`; toro EF emparejado hasta una órbita con VTK y diagnósticos auditados; convergencia 3D pendiente |
 
+Para una prueba puramente radial de Michel declare `ny = 1` y `nz = 1`: el preset activa también el azimut. La inicialización selecciona la rama transónica (subsónica fuera del radio crítico, supersónica dentro) y es regular en el horizonte. Requiere un fondo Schwarzschild, EF o KS con spin cero, `1 < adiabatic_index <= 2` y `michel_critical_radius > bh_mass*(3 + 1/(adiabatic_index - 1))/2`. La comparación interna de errores reutiliza el inicializador; una validación independiente debe comprobar la referencia, las fronteras y el refinamiento por separado.
+
 Cada problema carga un *preset* desde `initialization.f90`; el archivo `.par` sobrescribe después los valores especificados. Es aconsejable declarar de forma explícita todos los parámetros relevantes para una corrida científica.
 
 ### 4.3 Métricas y geometrías
@@ -211,11 +213,27 @@ riemann_solver = hlle | hllc
 shock_sensor   = true | false
 ```
 
-La profundidad de celdas fantasma se selecciona automáticamente: una para Godunov, dos para TVD/WENO3 y tres para MP5/WENO5. `HLLD` no es una opción válida: sólo existe un esqueleto que aborta si se invoca internamente.
+La profundidad de celdas fantasma se selecciona automáticamente: una para Godunov, dos para TVD/WENO3 sin sensor y tres para MP5/WENO5 o TVD/WENO3 con sensor. El sensor examina las seis celdas `i-2:i+3`, centradas en la cara `i+1/2`, y necesita tres capas actualizadas en ambos extremos; disponer de memoria en esos índices no basta. OpenACC usa al menos tres capas porque carga ese esténcil genérico. `HLLD` no es una opción válida: sólo existe un esqueleto que aborta si se invoca internamente.
 
 HLLE es el *baseline* robusto. HLLC está implementado para GRHD mediante un marco ortonormal local de cada cara y vuelve a HLLE ante estados degenerados o no admisibles.
 
 El sensor de choques puede degradar localmente la reconstrucción hacia métodos más robustos. Desactivarlo permite comparar reconstructores puros, pero no es una decisión universalmente más estable.
+
+Los umbrales se pueden configurar sin recompilar. Los valores predeterminados conservan los umbrales del sensor A usado en la validación SRHD 1D. Cada par es presión/densidad y se aplica al rango relativo máximo-mínimo de las seis celdas centradas en la cara:
+
+```text
+sensor_pressure_weno3 = 0.40
+sensor_density_weno3 = 0.15
+sensor_pressure_tvd = 0.80
+sensor_density_tvd = 0.50
+sensor_pressure_godunov = 10
+sensor_density_godunov = 10
+sensor_atmosphere_factor = 100
+```
+
+Para el sensor B de comparación se usan `0.80, 0.40, 1.50, 0.90` en las primeras cuatro claves; las otras tres no cambian. Se exige `0 < WENO3 <= TVD <= Godunov` por variable y factor de atmósfera al menos uno. Los umbrales efectivos se registran en `run_manifest.txt` y se conservan al reiniciar. La ruta CPU y la reconstrucción por caras reciben la misma configuración; la prueba de paridad por caras se ejecuta en CPU y no sustituye pruebas en una GPU real.
+
+Desde el 6 de octubre de 2026, el sensor usa la unión de los esténciles izquierdo y derecho para que su decisión sea invariante al reflejar el problema. La ventana anterior `i-2:i+2` estaba desplazada hacia la celda izquierda y podía limitar de forma distinta las interfaces reflejadas. `run_manifest.txt` identifica la nueva ventana con `shock_sensor_stencil=face_centered_i_minus_2_to_i_plus_3`. Los resultados con la ventana anterior mantienen su fuente congelada; conservar los mismos umbrales A/B no implica reproducir la misma trayectoria con esta corrección. Un restart antiguo inicia una continuación con el algoritmo del ejecutable usado.
 
 ### 4.5 Malla, tiempo y salida
 
@@ -256,6 +274,7 @@ Esta opción no cambia el estado ni las coordenadas de evolución.
 extract_gw = false
 extract_mdot = false
 ppi_diagnostics = true
+numerical_diagnostics = false
 diagnostic_stride = 100
 extraction_stride = 10
 mass_monitor_stride = 1000
@@ -267,7 +286,9 @@ perturbation_amplitude = 0.01
 perturbation_mode = 1.0
 ```
 
-`diagnostic_stride` controla la cadencia de `ppi_modes.dat` y `global_diagnostics.dat`; `extraction_stride` controla `GW_signal.dat` y `m_dot.dat`. `mass_monitor_stride` sólo controla el cálculo e impreso periódico de la masa en la terminal y puede fijarse en `0` para desactivarlo sin alterar los diagnósticos guardados.
+`diagnostic_stride` controla la cadencia de `ppi_modes.dat`, `global_diagnostics.dat` y, cuando se activa `numerical_diagnostics`, `numerical_diagnostics.dat`; `extraction_stride` controla `GW_signal.dat` y `m_dot.dat`. `mass_monitor_stride` sólo controla el cálculo e impreso periódico de la masa en la terminal y puede fijarse en `0` para desactivarlo sin alterar los diagnósticos guardados.
+
+`numerical_diagnostics = true` activa contadores acumulados del backend CPU/OpenMP: reconstrucciones efectivas por cara, floors de densidad/presión de los estados de interfaz, recuperaciones de primitivas, entradas en atmósfera, limitación de momento, fallos de inversión, saneamientos, limitación de velocidad en la conversión de centros y respaldos HLLC→HLLE. Se cuentan las caras de frontera y los tres subpasos RK; no son números de celdas únicas. La opción está apagada por defecto y añade trabajo de diagnóstico al activarla. Los contadores se reinician por proceso: un restart inicia otra sesión identificada en el archivo y no modifica el formato del checkpoint. Las columnas `raw_delta_*` suman las modificaciones de conservadas durante la recuperación, multiplicadas por el volumen lógico, sin ponderación RK; no deben interpretarse como un balance neto de conservación. La opción se rechaza explícitamente en una compilación OpenACC, donde estos contadores todavía no están implementados.
 
 `pressure_noise` y `density_noise` usan una semilla reproducible. `density_mode` inyecta un modo azimutal coherente cuyo número es `perturbation_mode`. La amplitud debe satisfacer `0 <= perturbation_amplitude < 1`.
 
@@ -294,7 +315,7 @@ Los parámetros de una condición inicial distinta a `problem` son rechazados; e
 
 ## 5. Reinicio desde checkpoint
 
-Los checkpoints actuales usan el identificador `GRHDCP_V5` y contienen malla, física, métodos, parámetros específicos de la condición inicial, estado conservado, tiempo, paso y estado de la perturbación. V5 registra el estado con el orden `[x,y,z,variable]`; el lector conserva compatibilidad con V2--V4 y transpone automáticamente sus estados `[variable,x,y,z]`. Los parámetros específicos permiten reconstruir exactamente las fronteras de Jet, Michel y Dust después de un reinicio.
+Los checkpoints actuales usan el identificador `GRHDCP_V6` y contienen malla, física, métodos, parámetros específicos de la condición inicial, estado conservado, tiempo, paso, estado de la perturbación y umbrales del sensor. V6 y V5 guardan el estado con el orden `[x,y,z,variable]`; el lector conserva compatibilidad con V2--V5 y transpone automáticamente los estados `[variable,x,y,z]` de V2--V4. Los parámetros específicos permiten reconstruir exactamente las fronteras de Jet, Michel y Dust después de un reinicio. Los checkpoints anteriores a V6 no registraban los umbrales: el lector asume A; si se produjeron con una fuente modificada para B, hay que declarar los umbrales originales en el `.par` de reinicio.
 
 Ejemplo mínimo:
 
@@ -350,6 +371,7 @@ donde `scheme_name` combina reconstructor y Riemann, por ejemplo `weno5_hlle`.
 | `m_dot.dat` | `t`, tasa de acreción |
 | `ppi_modes.dat` | masa y modos complejos `m=1,...,4` |
 | `global_diagnostics.dat` | masas, momento angular, extremos, `v^2` y conteos |
+| `radial_mass_budget.dat` | balance de masa de Michel radial CPU con `numerical_diagnostics=true`; flujos numéricos de ambos bordes integrados con pesos SSP-RK3 |
 | `perturbation_events.dat` | instante y parámetros de cada inyección |
 | `GW_signal.dat` | `t`, `h_plus`, `h_cross` del proxy Finn--Evans |
 | `convergence_*.dat`, `michel_convergence_*.dat`, `dust_convergence_*.dat` | normas de error para la onda advectada y las soluciones estacionarias de acreción |
@@ -359,6 +381,10 @@ El manifiesto se añade al reiniciar, delimitando cada sesión con `[run]` y `[/
 ### 6.1 Interpretación de diagnósticos
 
 La tasa de acreción se integra en la primera celda exterior al horizonte con la velocidad coordenada efectiva `alpha*v^r - beta^r`.
+
+En una prueba radial esférica con `ny = 1`, la cuadratura polar por punto medio introduce un factor `pi/2` respecto a la integral angular exacta de `4*pi`. Para comparar ese diagnóstico con la tasa esférica analítica, multiplique el valor nativo por `2/pi`; esta conversión sólo corresponde a una solución esféricamente simétrica con el dominio angular completo. Los VTK exportan `Velocity_X` y `Shift_beta_r` en coordenada radial física incluso cuando la evolución utiliza `x = ln(r)`.
+
+En Michel con `ny=nz=1`, CPU/OpenMP y diagnósticos numéricos activos, `radial_mass_budget.dat` registra `M-M0-(I_left-I_right)`. Las integrales usan los flujos numéricos realmente ejecutados en las caras y los pesos RK `1/6,1/6,2/3`; la masa usa la misma cuadratura nativa del estado conservado. El balance se reinicia por sesión al recuperar un checkpoint y permite distinguir cambios por frontera de un residuo de conservación. No sustituye los contadores de reparaciones ni se activa en GPU.
 
 Las fronteras radiales de salida en EF y Kerr--Schild aplican el mismo criterio al impedir entrada: el umbral de flujo coordenado nulo es `v^r = beta^r/alpha`, no `v^r = 0`. Esta distinción evita inyección espuria de masa cuando el *shift* radial es distinto de cero.
 
@@ -409,6 +435,46 @@ bash inundaciones_weno3.sh --detach
 
 Su log general queda en `../inundaciones_ppi_weno3_800_t5000/logs/inundaciones.driver.log` y el volumen esperado de resultados es cercano a 18 GB. La campaña histórica mostró que WENO3 podía sembrar modos antes de aplicar la perturbación explícita; por ello esta nueva serie es un control numérico útil, pero el crecimiento anterior a `t=1000 M` debe analizarse y reportarse por separado, no atribuirse a la perturbación programada.
 
+### 6.3 Campaña WENO3 mediante Slurm
+
+Para el cluster administrado por Slurm se proporciona un flujo separado que no utiliza el nombre histórico de la campaña. `submit_ppi_weno3.sh` reutiliza el ejecutable `grhd2` compilado previamente y envía dos arreglos de tres casos. La segunda tanda tiene una dependencia `afterok` de la primera, por lo que sólo se libera cuando EF `a=0` y KS `a=0,0.2` terminaron correctamente; entonces Slurm solicita recursos para KS `a=0.4,0.6,0.9`. Cada tarea usa por omisión 8 CPU OpenMP y las seis simulaciones conservan WENO3--HLLE, la malla exploratoria `400x1x200`, `t_final=5000 M` y la perturbación en `t=1000 M`.
+
+Desde una sesión interactiva donde `grhd2` ya se haya compilado y probado, la campaña completa se envía con un solo comando:
+
+```bash
+WALLTIME=3-00:00:00 CPUS_PER_CASE=8 bash submit_ppi_weno3.sh
+```
+
+`WALLTIME` puede ajustarse al límite de la partición. Si el centro exige cuenta, partición o reservación, se pueden pasar sin modificar los scripts:
+
+```bash
+ACCOUNT=mi_cuenta PARTITION=cpu RESERVATION=mi_reserva \
+WALLTIME=3-00:00:00 bash submit_ppi_weno3.sh
+```
+
+Los mensajes del planificador quedan en `slurm_logs/` y los resultados predeterminados en `ppi_weno3_400x1x200_t5000/`. Cada tarea genera su `.par`, lo valida y fija `OMP_NUM_THREADS` desde `SLURM_CPUS_PER_TASK`, junto con `OMP_PLACES=cores` y `OMP_PROC_BIND=close`. Los avisos `BEGIN`, `END` y `FAIL` se envían a `francisco.ruelas9565@alumnos.udg.mx`; la variable `MAIL_USER` permite sustituir esa dirección al invocar el lanzador. `PPI_NX` y `PPI_NZ` permiten cambiar la resolución y generan por omisión un directorio distinto para cada malla. Si se vuelve a enviar la campaña después de una interrupción, cada caso busca su checkpoint más reciente y crea una nueva sesión; no obstante, una tanda que termine por error no habilita automáticamente la siguiente porque la dependencia es deliberadamente `afterok`.
+
+El lanzador pasa la ruta absoluta del clon como `GRHD_REPO_ROOT` y fija allí el directorio de trabajo con `sbatch --chdir`. Esto es necesario porque Slurm ejecuta una copia temporal del `.sbatch` desde su área de *spool*: dentro de un trabajo no debe deducirse la ubicación del repositorio a partir de `BASH_SOURCE[0]`. Ni Git, Make ni el compilador se invocan dentro de los trabajos de evolución.
+
+Antes de enviar la campaña completa puede probarse el mismo patrón empleado por los trabajos validados de OllinSphere: compilar `grhd2` en la sesión interactiva y enviar directamente un arreglo que sólo usa el binario. `ppi_weno3_smoke.sbatch` ejecuta EF `a=0` y KS `a=0,0.2` simultáneamente, con dos CPU por caso, malla `80x1x40` y `t_final=0.5`. Los resultados se aíslan en `ppi_weno3_smoke/job_ARRAYID/` y no pueden mezclarse con la campaña científica:
+
+```bash
+mkdir -p slurm_logs
+sbatch ppi_weno3_smoke.sbatch
+```
+
+El archivo envía avisos `BEGIN`, `END` y `FAIL` por cada tarea a la dirección configurada mediante `--mail-user`. Si las tres tareas terminan con `PASS`, puede enviarse la campaña exploratoria `400x1x200`, `t_final=5000 M` con ocho CPU por caso.
+
+#### Prueba corta OpenMP con el jet
+
+Antes de la campaña larga puede comprobarse el funcionamiento de OpenMP con una sola asignación Slurm de 16 CPU. El trabajo ejecuta secuencialmente el mismo jet con 1, 2, 4, 8 y 16 hilos, de modo que las cinco mediciones se realizan en el mismo nodo sin competir entre sí. Usa una malla `160x1x400`, WENO5--HLLE, `shock_sensor = true` y evoluciona hasta `t=30`:
+
+```bash
+sbatch jet_openmp_scaling.sbatch
+```
+
+El archivo es autocontenido y solicita un nodo, una tarea, 16 CPU y treinta minutos. Si el centro exige cuenta, partición o reservación pueden agregarse como opciones de `sbatch`, o puede utilizarse `submit_jet_openmp_scaling.sh`, que acepta `ACCOUNT`, `PARTITION`, `RESERVATION` y `WALLTIME`. El log `jet_scaling_JOBID.log` muestra `OMP_NUM_THREADS`, `OMP_PLACES`, `OMP_PROC_BIND` y la afinidad observada por el runtime. Los resultados quedan en `jet_openmp_scaling/job_JOBID/`: `timing.tsv` registra tiempo, aceleración y eficiencia; los archivos `compare_1_vs_N.txt` comparan los siete campos del VTK final contra la referencia de un hilo.
+
 ## 7. Visualización y análisis
 
 Las salidas VTK pueden inspeccionarse con VisIt o ParaView. Salvo el controlador reproducible `inundaciones.sh`, los scripts de análisis y las configuraciones exploratorias se mantienen fuera de este repositorio mínimo; cualquier análisis destinado a una publicación debe conservar externamente su versión, dependencias y correspondencia con el manifiesto de la corrida.
@@ -431,9 +497,10 @@ Cobertura actual:
 - `test-polar`: periodicidad azimutal, cruce transpolar y paridades;
 - `test-cfl`: condición CFL aditiva en 1D, 2D y 3D con *shift*;
 - `test-minkowski-spherical`: forma analítica, equivalencia con EF para `bh_mass = 0` y curvatura nula en coordenadas radial física y logarítmica;
+- `test-michel-initial`: ramas transónicas, estado regular en el horizonte, invariantes y referencias independientes en EF/KS sin spin, mallas radial física/logarítmica e inyector externo;
 - `test-cases`: métrica cilíndrica `(rho,phi,z)`, perturbación transversal de Kelvin--Helmholtz, radio físico de OffAxis en malla logarítmica, solución/fronteras de acreción fría y salida radial compatible con *shift*.
-- `test-checkpoint`: escritura/lectura V5, conservación del estado y de los parámetros específicos necesarios para reproducir datos iniciales y fronteras.
-- `test-acc-reconstruction`: equivalencia de la reconstrucción por caras OpenACC con la ruta de tiras CPU para los cinco métodos, con y sin sensor.
+- `test-checkpoint`: escritura/lectura V6, compatibilidad V5 y conservación del estado, los umbrales del sensor y los parámetros específicos necesarios para reproducir datos iniciales y fronteras.
+- `test-acc-reconstruction`: equivalencia en CPU de la reconstrucción por caras con la ruta de tiras, para los cinco métodos, sensores A/B y perfiles suaves/discontinuos.
 - `test-acc-rhs`: equivalencia del RHS CPU/OpenACC para los cinco reconstructores, HLLE/HLLC y geometría plana/curva.
 - `test-output`: construcción segura de nombres VTK largos dentro de los límites públicos de configuración.
 

@@ -22,7 +22,7 @@ contains
     print *, 'OpenACC backend enabled: FP64 state and arithmetic.'
 
     !$acc enter data copyin(nx,ny,nz,nghost,dx,dy,dz,adb_idx,g1,rho_floor,p_floor, &
-    !$acc& rec_method_id,tvd_limiter_id,riemann_solver_id,use_shock_sensor, &
+    !$acc& rec_method_id,tvd_limiter_id,riemann_solver_id,use_shock_sensor,shock_sensor_thresholds, &
     !$acc& use_srhd_wavespeeds,flat_cartesian_sources,curved_metric, &
     !$acc& cylindrical_geometry,polar_geometry,case_id, &
     !$acc& jet_ambient_density,jet_ambient_pressure,jet_ambient_velocity, &
@@ -71,7 +71,7 @@ contains
     !$acc exit data delete(u,up,p,rhs)
     !$acc exit data delete(x,y,z,x_face,y_face,z_face)
     !$acc exit data delete(nx,ny,nz,nghost,dx,dy,dz,adb_idx,g1,rho_floor,p_floor, &
-    !$acc& rec_method_id,tvd_limiter_id,riemann_solver_id,use_shock_sensor, &
+    !$acc& rec_method_id,tvd_limiter_id,riemann_solver_id,use_shock_sensor,shock_sensor_thresholds, &
     !$acc& use_srhd_wavespeeds,flat_cartesian_sources,curved_metric, &
     !$acc& cylindrical_geometry,polar_geometry,case_id, &
     !$acc& jet_ambient_density,jet_ambient_pressure,jet_ambient_velocity, &

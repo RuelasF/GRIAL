@@ -57,6 +57,9 @@ contains
 
     ! --- ESCUDO DE CAUSALIDAD NUMÉRICA ---
     if (v_sq >= v_max) then
+#ifndef USE_OPENACC
+      call count_numerical_event(NUM_P2C_VELOCITY_CAP)
+#endif
       v(1) = v(1) * sqrt(v_max / v_sq)
       v(2) = v(2) * sqrt(v_max / v_sq)
       v(3) = v(3) * sqrt(v_max / v_sq)
@@ -105,6 +108,13 @@ contains
     real*8 :: g(3,3), ginv(3,3), sqg
     real*8 :: S_cov(3)
     integer :: ii, jj
+#ifndef USE_OPENACC
+    real*8 :: diagnostic_before(neq)
+    if (do_numerical_diagnostics) then
+      diagnostic_before=cons_state
+      call count_numerical_event(NUM_C2P_CALLS)
+    end if
+#endif
 
     ! 1. LEER MÉTRICA DE LA CACHÉ
     g(:,:)    = gamma_c(:,:,i,j,k)
@@ -116,12 +126,18 @@ contains
 
     ! --- ESCUDO PRE-INVERSIÓN ---
     if (cons_state(eq_de) <= local_D_floor) then
+#ifndef USE_OPENACC
+      call count_numerical_event(NUM_C2P_LOW_D)
+#endif
       prim_state(eq_de) = rho_floor
       prim_state(eq_pr) = p_floor
       prim_state(eq_vx:eq_vz) = 0.0d0
       cons_state(eq_de) = local_D_floor
       cons_state(eq_pr) = local_tau_floor
       cons_state(eq_vx:eq_vz) = 0.0d0
+#ifndef USE_OPENACC
+      if (do_numerical_diagnostics) call record_numerical_change(diagnostic_before,cons_state)
+#endif
       return
     end if
 
@@ -140,6 +156,9 @@ contains
     S_sq_max = max(0.0d0, E_tot**2 - cons_state(eq_de)**2) * v_max
 
     if (S_sq > S_sq_max .and. S_sq > 1.0d-20) then
+#ifndef USE_OPENACC
+      call count_numerical_event(NUM_C2P_MOMENTUM)
+#endif
       scale_factor = sqrt(S_sq_max / S_sq)
       cons_state(eq_vx) = cons_state(eq_vx) * scale_factor
       cons_state(eq_vy) = cons_state(eq_vy) * scale_factor
@@ -152,6 +171,9 @@ contains
 
     ! --- ESCUDO DE FALLO DEL SOLUCIONADOR ---
     if (W < 1.0d0) then
+#ifndef USE_OPENACC
+      call count_numerical_event(NUM_C2P_ROOT_FAIL)
+#endif
       prim_state(eq_de) = rho_floor
       prim_state(eq_pr) = p_floor
       prim_state(eq_vx:eq_vz) = 0.0d0
@@ -159,6 +181,9 @@ contains
       cons_state(eq_de) = local_D_floor
       cons_state(eq_pr) = local_tau_floor
       cons_state(eq_vx:eq_vz) = 0.0d0
+#ifndef USE_OPENACC
+      if (do_numerical_diagnostics) call record_numerical_change(diagnostic_before,cons_state)
+#endif
       return
     end if
 
@@ -166,12 +191,18 @@ contains
     call eval_V_and_dV(W, cons_state, V, dV)
 
     if (V <= 0.0d0 .or. isnan(V)) then
+#ifndef USE_OPENACC
+      call count_numerical_event(NUM_C2P_BAD_V)
+#endif
       prim_state(eq_de) = rho_floor
       prim_state(eq_pr) = p_floor
       prim_state(eq_vx:eq_vz) = 0.0d0
       cons_state(eq_de) = local_D_floor
       cons_state(eq_pr) = local_tau_floor
       cons_state(eq_vx:eq_vz) = 0.0d0
+#ifndef USE_OPENACC
+      if (do_numerical_diagnostics) call record_numerical_change(diagnostic_before,cons_state)
+#endif
       return
     end if
 
@@ -196,6 +227,9 @@ contains
         isnan(prim_state(eq_de)) .or. isnan(prim_state(eq_pr)) .or. &
         isnan(prim_state(eq_vx)) .or. isnan(prim_state(eq_vy)) .or. isnan(prim_state(eq_vz)) .or. &
         isnan(v_sq_final) .or. v_sq_final >= v_max) then
+#ifndef USE_OPENACC
+      call count_numerical_event(NUM_C2P_SANITIZE)
+#endif
       prim_state(eq_de) = rho_floor
       prim_state(eq_pr) = p_floor
       prim_state(eq_vx:eq_vz) = 0.0d0
@@ -204,6 +238,9 @@ contains
       cons_state(eq_pr) = local_tau_floor
       cons_state(eq_vx:eq_vz) = 0.0d0
     end if
+#ifndef USE_OPENACC
+    if (do_numerical_diagnostics) call record_numerical_change(diagnostic_before,cons_state)
+#endif
   end subroutine cons_to_prim
 
   ! ===================================================================================

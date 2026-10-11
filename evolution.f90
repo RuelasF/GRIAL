@@ -57,6 +57,7 @@ contains
     real*8 :: a, b(3), g(3,3), sqg
 
     rhs_out = 0.0d0
+    if (do_radial_mass_budget) radial_mass_flux = 0.0d0
 
     ! =====================================================================
     ! 1. BARRIDO EN DIRECCIÓN X (Radial / Horizontal)
@@ -98,6 +99,12 @@ contains
                                          DIR_X, a, b, g, sqg, flux_strip(:,i))
           end if
         end do
+
+        ! Only one strip exists when the radial budget is enabled (ny=nz=1).
+        if (do_radial_mass_budget) then
+          radial_mass_flux(1) = flux_strip(eq_de,0)*dy*dz
+          radial_mass_flux(2) = flux_strip(eq_de,nx)*dy*dz
+        end if
 
         ! D. Ensamblaje del RHS en los Centros Celulares (1 a nx)
         do i = 1, nx
@@ -273,7 +280,8 @@ contains
               stencil(m,offset)=p_in(i+offset,j,k,m)
             end do
           end do
-          if (rec_method_id == REC_MP5 .or. rec_method_id == REC_WENO5) then
+          if (rec_method_id == REC_MP5 .or. rec_method_id == REC_WENO5 .or. &
+              (use_shock_sensor .and. rec_method_id /= REC_GODUNOV)) then
             do m=1,neq
               stencil(m,3)=p_in(i+3,j,k,m)
             end do
@@ -281,7 +289,7 @@ contains
             stencil(:,3)=0.0d0
           end if
           call reconstruct_face_state(stencil,i,nx,DIR_X,rec_method_id,tvd_limiter_id, &
-               use_shock_sensor,curved_metric,rho_floor,p_floor,q_left,q_right)
+               use_shock_sensor,curved_metric,rho_floor,p_floor,q_left,q_right,shock_sensor_thresholds)
           do m=1,neq
             qlx(i,j,k,m)=q_left(m)
             qrx(i,j,k,m)=q_right(m)
@@ -346,7 +354,8 @@ contains
                 stencil(m,offset)=p_in(i,j+offset,k,m)
               end do
             end do
-            if (rec_method_id == REC_MP5 .or. rec_method_id == REC_WENO5) then
+            if (rec_method_id == REC_MP5 .or. rec_method_id == REC_WENO5 .or. &
+              (use_shock_sensor .and. rec_method_id /= REC_GODUNOV)) then
               do m=1,neq
                 stencil(m,3)=p_in(i,j+3,k,m)
               end do
@@ -354,7 +363,7 @@ contains
               stencil(:,3)=0.0d0
             end if
             call reconstruct_face_state(stencil,j,ny,DIR_Y,rec_method_id,tvd_limiter_id, &
-                 use_shock_sensor,curved_metric,rho_floor,p_floor,q_left,q_right)
+                 use_shock_sensor,curved_metric,rho_floor,p_floor,q_left,q_right,shock_sensor_thresholds)
             do m=1,neq
               qly(i,j,k,m)=q_left(m)
               qry(i,j,k,m)=q_right(m)
@@ -414,7 +423,8 @@ contains
                 stencil(m,offset)=p_in(i,j,k+offset,m)
               end do
             end do
-            if (rec_method_id == REC_MP5 .or. rec_method_id == REC_WENO5) then
+            if (rec_method_id == REC_MP5 .or. rec_method_id == REC_WENO5 .or. &
+              (use_shock_sensor .and. rec_method_id /= REC_GODUNOV)) then
               do m=1,neq
                 stencil(m,3)=p_in(i,j,k+3,m)
               end do
@@ -422,7 +432,7 @@ contains
               stencil(:,3)=0.0d0
             end if
             call reconstruct_face_state(stencil,k,nz,DIR_Z,rec_method_id,tvd_limiter_id, &
-                 use_shock_sensor,curved_metric,rho_floor,p_floor,q_left,q_right)
+                 use_shock_sensor,curved_metric,rho_floor,p_floor,q_left,q_right,shock_sensor_thresholds)
             do m=1,neq
               qlz(i,j,k,m)=q_left(m)
               qrz(i,j,k,m)=q_right(m)

@@ -23,6 +23,12 @@ TEST_CHECKPOINT_TARGET = tests/test_checkpoint_v5
 TEST_OUTPUT_TARGET = tests/test_output_paths
 TEST_ACC_RECON_TARGET = tests/test_accelerator_reconstruction
 TEST_ACC_RHS_TARGET = tests/test_accelerator_rhs
+TEST_NUMERICAL_TARGET = tests/test_numerical_diagnostics
+TEST_SPATIAL_TARGET = tests/test_spatial_order
+TEST_SENSOR_BOUNDARY_TARGET = tests/test_sensor_boundaries
+TEST_SENSOR_SYMMETRY_TARGET = tests/test_sensor_symmetry
+TEST_KHI_DIAGNOSTICS_TARGET = tests/test_khi_diagnostics
+TEST_MICHEL_INITIAL_TARGET = tests/test_michel_initial
 
 .PHONY: server-broadwell openacc-p100 openacc-rtx4070 benchmark-jet-p100 test test-hllc test-gw test-gw-geometry test-gw-stress test-fm test-polar test-cfl test-minkowski-spherical test-cases test-checkpoint test-output test-acc-reconstruction test-acc-rhs clean
 
@@ -65,7 +71,37 @@ OBJS = variables.o \
 $(TARGET): $(OBJS)
 	$(FC) $(FFLAGS) -o $(TARGET) $(OBJS)
 
-test: test-hllc test-gw test-fm test-polar test-cfl test-minkowski-spherical test-cases test-checkpoint test-output test-acc-reconstruction test-acc-rhs
+test: test-hllc test-gw test-fm test-polar test-cfl test-minkowski-spherical test-cases test-checkpoint test-output test-acc-reconstruction test-acc-rhs test-numerical-diagnostics test-spatial-order test-sensor-boundaries test-sensor-symmetry test-khi-diagnostics test-michel-initial
+
+.PHONY: test-sensor-symmetry
+test-sensor-symmetry: variables.o reconstruction.o tests/test_sensor_symmetry.f90
+	$(FC) $(FFLAGS) -o $(TEST_SENSOR_SYMMETRY_TARGET) tests/test_sensor_symmetry.f90 variables.o reconstruction.o
+	OMP_NUM_THREADS=4 ./$(TEST_SENSOR_SYMMETRY_TARGET)
+
+.PHONY: test-michel-initial
+test-michel-initial: variables.o metrics.o conditions.o tests/test_michel_initial.f90
+	$(FC) $(FFLAGS) -o $(TEST_MICHEL_INITIAL_TARGET) tests/test_michel_initial.f90 variables.o metrics.o conditions.o
+	OMP_NUM_THREADS=1 ./$(TEST_MICHEL_INITIAL_TARGET)
+
+.PHONY: test-khi-diagnostics
+test-khi-diagnostics: variables.o metrics.o conditions.o output.o tests/test_khi_diagnostics.f90
+	$(FC) $(FFLAGS) -o $(TEST_KHI_DIAGNOSTICS_TARGET) tests/test_khi_diagnostics.f90 variables.o metrics.o conditions.o output.o
+	OMP_NUM_THREADS=1 ./$(TEST_KHI_DIAGNOSTICS_TARGET)
+
+.PHONY: test-sensor-boundaries
+test-sensor-boundaries: variables.o parameters.o metrics.o conditions.o equations.o fluxes.o reconstruction.o initialization.o tests/test_sensor_boundaries.f90
+	$(FC) $(FFLAGS) -o $(TEST_SENSOR_BOUNDARY_TARGET) tests/test_sensor_boundaries.f90 variables.o parameters.o metrics.o conditions.o equations.o fluxes.o reconstruction.o initialization.o
+	OMP_NUM_THREADS=1 ./$(TEST_SENSOR_BOUNDARY_TARGET)
+
+.PHONY: test-spatial-order
+test-spatial-order: variables.o metrics.o equations.o fluxes.o reconstruction.o tests/test_spatial_order.f90
+	$(FC) $(FFLAGS) -o $(TEST_SPATIAL_TARGET) tests/test_spatial_order.f90 variables.o metrics.o equations.o fluxes.o reconstruction.o
+	OMP_NUM_THREADS=1 ./$(TEST_SPATIAL_TARGET)
+
+.PHONY: test-numerical-diagnostics
+test-numerical-diagnostics: variables.o metrics.o equations.o fluxes.o reconstruction.o tests/test_numerical_diagnostics.f90
+	$(FC) $(FFLAGS) -o $(TEST_NUMERICAL_TARGET) tests/test_numerical_diagnostics.f90 variables.o metrics.o equations.o fluxes.o reconstruction.o
+	OMP_NUM_THREADS=4 ./$(TEST_NUMERICAL_TARGET)
 
 test-hllc: variables.o metrics.o equations.o fluxes.o tests/test_hllc_fluxes.f90
 	$(FC) $(FFLAGS) -o $(TEST_HLLC_TARGET) tests/test_hllc_fluxes.f90 variables.o metrics.o equations.o fluxes.o
@@ -137,4 +173,4 @@ grhd2.o: variables.o parameters.o metrics.o initialization.o conditions.o equati
 
 # Limpiar archivos compilados (comando: make clean)
 clean:
-	rm -f *.o *.mod $(TARGET) $(TEST_HLLC_TARGET) $(TEST_GW_GEOMETRY_TARGET) $(TEST_GW_STRESS_TARGET) $(TEST_FM_TARGET) $(TEST_POLAR_TARGET) $(TEST_CFL_TARGET) $(TEST_MINKOWSKI_SPHERICAL_TARGET) $(TEST_CASE_CORRECTIONS_TARGET) $(TEST_CHECKPOINT_TARGET) $(TEST_OUTPUT_TARGET) $(TEST_ACC_RECON_TARGET) $(TEST_ACC_RHS_TARGET)
+	rm -f *.o *.mod $(TARGET) $(TEST_HLLC_TARGET) $(TEST_GW_GEOMETRY_TARGET) $(TEST_GW_STRESS_TARGET) $(TEST_FM_TARGET) $(TEST_POLAR_TARGET) $(TEST_CFL_TARGET) $(TEST_MINKOWSKI_SPHERICAL_TARGET) $(TEST_CASE_CORRECTIONS_TARGET) $(TEST_CHECKPOINT_TARGET) $(TEST_OUTPUT_TARGET) $(TEST_ACC_RECON_TARGET) $(TEST_ACC_RHS_TARGET) $(TEST_NUMERICAL_TARGET) $(TEST_SPATIAL_TARGET) $(TEST_SENSOR_BOUNDARY_TARGET) $(TEST_SENSOR_SYMMETRY_TARGET) $(TEST_KHI_DIAGNOSTICS_TARGET) $(TEST_MICHEL_INITIAL_TARGET)

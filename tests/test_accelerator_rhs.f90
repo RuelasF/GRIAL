@@ -7,7 +7,7 @@ program test_accelerator_rhs
   integer :: i,j,k,m,method,solver,geometry_mode,failures,loc(4)
 
   failures=0
-  nx=9; ny=1; nz=8; nghost=3
+  nx=9; ny=5; nz=8; nghost=3
   dx=0.1d0; dy=1.0d0; dz=0.2d0
   adb_idx=4.0d0/3.0d0; g1=adb_idx/(adb_idx-1.0d0)
   rho_floor=1.0d-10; p_floor=1.0d-13
@@ -24,26 +24,30 @@ program test_accelerator_rhs
   allocate(dg_c(0:3,0:3,1:3,nx,ny,nz),dlna_c(0:3,nx,ny,nz))
   allocate(alpha_f_x(nx+1,ny,nz),beta_f_x(3,nx+1,ny,nz))
   allocate(gamma_f_x(3,3,nx+1,ny,nz),sqrt_gamma_f_x(nx+1,ny,nz))
+  allocate(alpha_f_y(nx,ny+1,nz),beta_f_y(3,nx,ny+1,nz))
+  allocate(gamma_f_y(3,3,nx,ny+1,nz),sqrt_gamma_f_y(nx,ny+1,nz))
   allocate(alpha_f_z(nx,ny,nz+1),beta_f_z(3,nx,ny,nz+1))
   allocate(gamma_f_z(3,3,nx,ny,nz+1),sqrt_gamma_f_z(nx,ny,nz+1))
 
   alpha_c=1.0d0; beta_c=0.0d0; gamma_c=0.0d0; gamma_inv_c=0.0d0
   gmunu_c=0.0d0; sqrt_gamma_c=1.0d0; chris_c=0.0d0; dg_c=0.0d0; dlna_c=0.0d0
   alpha_f_x=1.0d0; beta_f_x=0.0d0; gamma_f_x=0.0d0; sqrt_gamma_f_x=1.0d0
+  alpha_f_y=1.0d0; beta_f_y=0.0d0; gamma_f_y=0.0d0; sqrt_gamma_f_y=1.0d0
   alpha_f_z=1.0d0; beta_f_z=0.0d0; gamma_f_z=0.0d0; sqrt_gamma_f_z=1.0d0
   do m=1,3
     gamma_c(m,m,:,:,:)=1.0d0; gamma_inv_c(m,m,:,:,:)=1.0d0
     gamma_f_x(m,m,:,:,:)=1.0d0; gamma_f_z(m,m,:,:,:)=1.0d0
+    gamma_f_y(m,m,:,:,:)=1.0d0
   end do
   do i=0,nx; x_face(i)=dble(i)*dx; end do
-  y_face=0.0d0
+  do j=0,ny; y_face(j)=dble(j)*dy; end do
   do k=0,nz; z_face(k)=dble(k)*dz; end do
 
   do k=-nghost,nz+nghost; do j=-nghost,ny+nghost; do i=-nghost,nx+nghost
-    p(i,j,k,eq_de)=1.0d0+0.03d0*sin(0.3d0*dble(i))+0.02d0*cos(0.4d0*dble(k))
-    p(i,j,k,eq_pr)=0.5d0+0.02d0*cos(0.2d0*dble(i-k))
+    p(i,j,k,eq_de)=1.0d0+0.03d0*sin(0.3d0*dble(i))+0.02d0*cos(0.4d0*dble(k))+0.025d0*sin(0.5d0*dble(j))
+    p(i,j,k,eq_pr)=0.5d0+0.02d0*cos(0.2d0*dble(i-k))+0.015d0*cos(0.3d0*dble(j))
     p(i,j,k,eq_vx)=0.08d0*sin(0.1d0*dble(i))
-    p(i,j,k,eq_vy)=0.0d0
+    p(i,j,k,eq_vy)=0.01d0*sin(0.4d0*dble(j))
     p(i,j,k,eq_vz)=0.05d0*cos(0.2d0*dble(k))
   end do; end do; end do
 

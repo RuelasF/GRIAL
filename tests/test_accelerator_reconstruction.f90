@@ -6,7 +6,7 @@ program test_accelerator_reconstruction
   integer, parameter :: nodes=8
   real*8 :: line(neq,-3:nodes+3),ql_ref(neq,0:nodes),qr_ref(neq,0:nodes)
   real*8 :: stencil(neq,-2:3),ql_face(neq),qr_face(neq)
-  integer :: method,sensor,face,component,offset,failures
+  integer :: method,sensor,face,component,offset,failures,variant,profile
 
   failures=0
   nghost=3
@@ -16,14 +16,22 @@ program test_accelerator_reconstruction
   curved_metric=.false.
   metric_type='Minkowski'
 
+  do profile=0,1
   do face=-3,nodes+3
     line(eq_de,face)=1.0d0+0.02d0*dble(face)+0.08d0*sin(0.7d0*dble(face))
     line(eq_pr,face)=0.4d0+0.01d0*dble(face)+0.03d0*cos(0.9d0*dble(face))
     line(eq_vx,face)=0.05d0*sin(0.3d0*dble(face))
     line(eq_vy,face)=0.02d0*cos(0.4d0*dble(face))
     line(eq_vz,face)=-0.01d0*sin(0.2d0*dble(face))
+    if (profile == 1 .and. face >= 4) then
+      line(eq_de,face)=1.65d0*line(eq_de,face)
+      line(eq_pr,face)=1.70d0*line(eq_pr,face)
+    end if
   end do
 
+  do variant=0,1
+    shock_sensor_thresholds=SENSOR_DEFAULTS
+    if (variant == 1) shock_sensor_thresholds=[0.80d0,0.40d0,1.50d0,0.90d0,10.0d0,10.0d0,100.0d0]
   do sensor=0,1
     use_shock_sensor=sensor == 1
     do method=REC_GODUNOV,REC_WENO5
@@ -36,7 +44,7 @@ program test_accelerator_reconstruction
           end do
         end do
         call reconstruct_face_state(stencil,face,nodes,DIR_X,method,tvd_limiter_id, &
-             use_shock_sensor,curved_metric,rho_floor,p_floor,ql_face,qr_face)
+             use_shock_sensor,curved_metric,rho_floor,p_floor,ql_face,qr_face,shock_sensor_thresholds)
         if (maxval(abs(ql_face-ql_ref(:,face))) > 5.0d-15 .or. &
             maxval(abs(qr_face-qr_ref(:,face))) > 5.0d-15) then
           failures=failures+1
@@ -46,6 +54,8 @@ program test_accelerator_reconstruction
         end if
       end do
     end do
+  end do
+  end do
   end do
 
   if (failures /= 0) then

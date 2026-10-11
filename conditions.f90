@@ -287,128 +287,140 @@ contains
     real*8, intent(in) :: r_critical, rho_critical
     real*8, intent(in), optional :: amp
     real*8, intent(out) :: prim_state(:,:,:,:)
+    real*8 :: u_c, energy, ur, ux, r_loc, rho, pres, k_poly, rho_final
+    real*8 :: mass_flux, cs2_c, h_c, w_lorentz, g(3,3), beta(3), alpha
+    real*8 :: g_tt, g_tx, b_quad, c_quad, discriminant, u_t_contra
+    integer :: i, j, k
 
-    real*8 :: u_c, ut_c, ur, ux, r_loc
-    real*8 :: rho, pres, K_poly, h_spec, rho_final
-    real*8 :: C1, C2, Vc2
-    real*8 :: f_res, df_res, eps_tol = 1.0d-6
-    real*8 :: f_p, h_p, rho_p, p_p, ur_p, ut_p, ut_tmp
-    real*8 :: f_m, h_m, rho_m, p_m, ur_m, ut_m
-    real*8 :: W_lorentz, g(3,3), beta(3), alpha
-    integer :: local_nx, local_ny, local_nz
-    integer :: i, j, k, iter, ii, jj
+    if (bh_mass <= 0.0d0 .or. r_critical <= 1.5d0*bh_mass .or. &
+        rho_critical <= 0.0d0 .or. adb_idx <= 1.0d0 .or. adb_idx > 2.0d0) then
+      write(*,*) 'CRITICAL ERROR: unphysical Michel parameters.'
+      error stop 1
+    end if
+    cs2_c = bh_mass / (2.0d0*r_critical - 3.0d0*bh_mass)
+    if (bh_mass <= 0.0d0 .or. rho_critical <= 0.0d0 .or. &
+        cs2_c <= 0.0d0 .or. cs2_c >= adb_idx-1.0d0) then
+      write(*,*) 'CRITICAL ERROR: unphysical Michel critical point.'
+      error stop 1
+    end if
+    u_c = sqrt(bh_mass/(2.0d0*r_critical))
+    pres = cs2_c*rho_critical / (adb_idx-cs2_c*g1)
+    k_poly = pres / rho_critical**adb_idx
+    h_c = 1.0d0 + g1*pres/rho_critical
+    mass_flux = r_critical**2*rho_critical*u_c
+    energy = h_c*sqrt(1.0d0-2.0d0*bh_mass/r_critical+u_c**2)
 
-    ! Variables para la solución cuadrática universal
-    real*8 :: g_tt, g_tx, A_quad, B_quad, C_quad, u_t_contra
-
-    local_nx = size(prim_state, 1)
-    local_ny = size(prim_state, 2)
-    local_nz = size(prim_state, 3)
-
-    ! Constantes de la solución asintótica
-    u_c = -sqrt(bh_mass/(2.0d0*r_critical))
-    ut_c = sqrt(1.0d0 - 2.0d0*bh_mass/r_critical + u_c*u_c)
-    Vc2 = (u_c/ut_c)**2
-    pres = (Vc2 * rho_critical) / (adb_idx - Vc2*g1)
-    K_poly = pres / rho_critical**adb_idx
-    h_spec = 1.0d0 + g1 * pres/rho_critical
-
-    C1 = r_critical**2 * rho_critical * u_c
-    C2 = r_critical**2 * rho_critical * h_spec * u_c * ut_c
-
-    do i = 1, local_nx
-      ! Extracción segura de la coordenada
-      if (use_log_r) then
-        r_loc = exp(x(i))
-      else
-        r_loc = x(i)
-      end if
-
-      ur = -sqrt(2.0d0*bh_mass/r_loc)
-
-      ! Buscador de raíces de Newton-Raphson para el fluido
-      do iter = 1, 40
-        ut_tmp = sqrt(1.0d0 - 2.0d0*bh_mass/r_loc + ur**2)
-        rho = C1/(r_loc**2 * ur)
-        pres = K_poly * rho**adb_idx
-        h_spec = 1.0d0 + g1 * pres/rho
-        f_res = h_spec*ut_tmp - C2/C1
-
-        ur_p = ur + eps_tol
-        ur_m = ur - eps_tol
-
-        ut_p = sqrt(1.0d0 - 2.0d0*bh_mass/r_loc + ur_p**2)
-        rho_p = C1/(r_loc**2 * ur_p)
-        p_p = K_poly * rho_p**adb_idx
-        h_p = 1.0d0 + g1 * p_p/rho_p
-        f_p = h_p*ut_p - C2/C1
-
-        ut_m = sqrt(1.0d0 - 2.0d0*bh_mass/r_loc + ur_m**2)
-        rho_m = C1/(r_loc**2 * ur_m)
-        p_m = K_poly * rho_m**adb_idx
-        h_m = 1.0d0 + g1 * p_m/rho_m
-        f_m = h_m*ut_m - C2/C1
-
-        df_res = (f_p - f_m)/(2.0d0*eps_tol)
-
-        ur = ur - f_res/df_res
-        if(abs(f_res) < 1.0d-12) exit
-      end do
-
-      rho = C1/(r_loc**2 * ur)
-      pres = K_poly * rho**adb_idx
-
+    do i = 1, size(prim_state,1)
+      r_loc = x(i)
+      if (use_log_r) r_loc = exp(x(i))
+      ur = -michel_inflow_speed(r_loc,r_critical,u_c,mass_flux,energy,k_poly)
+      rho = mass_flux / (-r_loc**2*ur)
+      pres = k_poly*rho**adb_idx
       rho_final = rho
-      if (present(amp)) rho_final = rho + amp * exp(-0.5d0*((r_loc - 30.0d0)/2.0d0)**2)
+      if (present(amp)) rho_final = rho + amp*exp(-0.5d0*((r_loc-30.0d0)/2.0d0)**2)
+      ux = ur
+      if (use_log_r) ux = ur/r_loc
 
-      do k = 1, local_nz
-        do j = 1, local_ny
-
-          ! 1. OBTENCIÓN DE MÉTRICA SEGURA PARA CELDAS FANTASMA
-          ! (Ignoramos la caché local aquí para evitar el Out-Of-Bounds en i > nx)
-          call calculate_metric(x(i), y(j), alpha=alpha, beta=beta, gamma=g)
-
-          if (use_log_r) then
-            ux = ur / r_loc
-          else
-            ux = ur
-          end if
-
-          ! =========================================================
-          ! 2. SOLUCIÓN CUADRÁTICA UNIVERSAL GRHD PARA u^t
-          ! Resolvemos exactamente g_mu_nu u^mu u^nu = -1
-          ! =========================================================
-          g_tt = -alpha**2
-          do ii = 1, 3
-            do jj = 1, 3
-              g_tt = g_tt + g(ii,jj) * beta(ii) * beta(jj)
-            end do
-          end do
-
-          g_tx = 0.0d0
-          do jj = 1, 3
-            g_tx = g_tx + g(1,jj) * beta(jj)
-          end do
-
-          A_quad = g_tt
-          B_quad = 2.0d0 * g_tx * ux
-          C_quad = g(1,1) * ux**2 + 1.0d0
-
-          ! Extracción de la raíz físicamente válida (u^t > 0)
-          u_t_contra = (-B_quad - sqrt(B_quad**2 - 4.0d0 * A_quad * C_quad)) / (2.0d0 * A_quad)
-          W_lorentz = alpha * u_t_contra
-
-          ! 3. ASIGNACIÓN FINAL AL ESTADO PRIMITIVO
+      do k = 1, size(prim_state,3)
+        do j = 1, size(prim_state,2)
+          call calculate_metric(x(i),y(j),alpha=alpha,beta=beta,gamma=g)
+          g_tt = -alpha**2 + dot_product(beta,matmul(g,beta))
+          g_tx = dot_product(g(1,:),beta)
+          b_quad = 2.0d0*g_tx*ux
+          c_quad = 1.0d0 + g(1,1)*ux**2
+          discriminant = sqrt(b_quad**2-4.0d0*g_tt*c_quad)
+          ! Rationalized future-directed root: finite also at g_tt=0 (r=2M).
+          u_t_contra = 2.0d0*c_quad / (discriminant-b_quad)
+          w_lorentz = alpha*u_t_contra
           prim_state(i,j,k,eq_de) = rho_final
           prim_state(i,j,k,eq_pr) = pres
-          prim_state(i,j,k,eq_vx) = ux / W_lorentz + beta(1) / alpha
-          prim_state(i,j,k,eq_vy) = beta(2) / alpha
-          prim_state(i,j,k,eq_vz) = beta(3) / alpha
-
+          prim_state(i,j,k,eq_vx) = ux/w_lorentz + beta(1)/alpha
+          prim_state(i,j,k,eq_vy) = beta(2)/alpha
+          prim_state(i,j,k,eq_vz) = beta(3)/alpha
         end do
       end do
     end do
   end subroutine setup_michel_accretion_initial
+
+
+  function michel_inflow_speed(r,r_critical,u_c,mass_flux,energy,k_poly) result(speed)
+    real*8, intent(in) :: r, r_critical, u_c, mass_flux, energy, k_poly
+    real*8 :: speed, f, lo, hi, mid, u_trial, h, cs2, minimum, f_lo, f_mid
+    integer :: iter
+
+    if (r <= 0.0d0) then
+      write(*,*) 'CRITICAL ERROR: Michel requires positive physical radii.'
+      error stop 1
+    end if
+    if (abs(r-r_critical) <= 16.0d0*epsilon(r)*r_critical) then
+      speed = u_c
+      return
+    end if
+    f = 1.0d0-2.0d0*bh_mass/r
+    hi = log(max(10.0d0,10.0d0*sqrt(2.0d0*bh_mass/r)))
+    if (f > 0.0d0) then
+      ! Bernoulli has two roots. Its minimum separates the two branches.
+      lo = -40.0d0
+      do iter = 1, 100
+        mid = 0.5d0*(lo+hi)
+        u_trial = exp(mid)
+        h = 1.0d0+g1*k_poly*(mass_flux/(r**2*u_trial))**(adb_idx-1.0d0)
+        cs2 = (adb_idx-1.0d0)*(h-1.0d0)/h
+        if (u_trial**2/(f+u_trial**2) > cs2) then
+          hi = mid
+        else
+          lo = mid
+        end if
+      end do
+      minimum = 0.5d0*(lo+hi)
+      f_mid = michel_bernoulli_residual(minimum,r,f,mass_flux,energy,k_poly)
+      if (f_mid > 0.0d0) then
+        if (f_mid > 64.0d0*epsilon(energy)*energy) then
+          write(*,*) 'CRITICAL ERROR: cannot bracket Michel Bernoulli root at r=',r
+          error stop 1
+        end if
+        ! Roundoff can hide the double root in the immediate sonic vicinity.
+        speed = exp(minimum)
+        return
+      end if
+      if (r > r_critical) then
+        lo = -40.0d0
+        hi = minimum
+      else
+        lo = minimum
+        hi = log(max(10.0d0,10.0d0*sqrt(2.0d0*bh_mass/r)))
+      end if
+    else
+      lo = -40.0d0
+      if (f < 0.0d0) lo = log(sqrt(-f))
+    end if
+    f_lo = michel_bernoulli_residual(lo,r,f,mass_flux,energy,k_poly)
+    if (f_lo*michel_bernoulli_residual(hi,r,f,mass_flux,energy,k_poly) > 0.0d0) then
+      write(*,*) 'CRITICAL ERROR: invalid Michel root bracket at r=',r
+      error stop 1
+    end if
+    do iter = 1, 100
+      mid = 0.5d0*(lo+hi)
+      f_mid = michel_bernoulli_residual(mid,r,f,mass_flux,energy,k_poly)
+      if ((f_mid > 0.0d0) .eqv. (f_lo > 0.0d0)) then
+        lo = mid
+        f_lo = f_mid
+      else
+        hi = mid
+      end if
+      if (hi-lo <= 4.0d0*epsilon(mid)*max(1.0d0,abs(mid))) exit
+    end do
+    speed = exp(0.5d0*(lo+hi))
+  end function michel_inflow_speed
+
+
+  function michel_bernoulli_residual(log_u,r,f,mass_flux,energy,k_poly) result(residual)
+    real*8, intent(in) :: log_u, r, f, mass_flux, energy, k_poly
+    real*8 :: residual, speed, h
+    speed = exp(log_u)
+    h = 1.0d0+g1*k_poly*(mass_flux/(r**2*speed))**(adb_idx-1.0d0)
+    residual = h*sqrt(max(0.0d0,f+speed**2))-energy
+  end function michel_bernoulli_residual
 
   ! ========================================================================
   ! TORO DE FISHBONE-MONCRIEF

@@ -311,6 +311,22 @@ contains
         call parse_tvd_limiter(value, tvd_limiter_id, file_name, line_number)
       case('shock_sensor')
         call parse_logical_value(value, use_shock_sensor, file_name, line_number)
+      case('sensor_pressure_weno3')
+        call parse_real_value(value, shock_sensor_thresholds(1), file_name, line_number)
+      case('sensor_density_weno3')
+        call parse_real_value(value, shock_sensor_thresholds(2), file_name, line_number)
+      case('sensor_pressure_tvd')
+        call parse_real_value(value, shock_sensor_thresholds(3), file_name, line_number)
+      case('sensor_density_tvd')
+        call parse_real_value(value, shock_sensor_thresholds(4), file_name, line_number)
+      case('sensor_pressure_godunov')
+        call parse_real_value(value, shock_sensor_thresholds(5), file_name, line_number)
+      case('sensor_density_godunov')
+        call parse_real_value(value, shock_sensor_thresholds(6), file_name, line_number)
+      case('sensor_atmosphere_factor')
+        call parse_real_value(value, shock_sensor_thresholds(7), file_name, line_number)
+      case('numerical_diagnostics')
+        call parse_logical_value(value, do_numerical_diagnostics, file_name, line_number)
       case('final_time')
         call parse_real_value(value, final_time, file_name, line_number)
       case('cfl')
@@ -414,6 +430,16 @@ contains
     end if
     if (rec_method_id < REC_GODUNOV .or. rec_method_id > REC_WENO5) then
       call parameter_error(file_name, 0, 'identificador de reconstruccion invalido')
+    end if
+    if (do_numerical_diagnostics .and. accelerator_enabled) then
+      call parameter_error(file_name, 0, 'numerical_diagnostics requiere el backend CPU/OpenMP')
+    end if
+    if (.not. all(ieee_is_finite(shock_sensor_thresholds)) .or. &
+        any(shock_sensor_thresholds <= 0.0d0) .or. &
+        any(shock_sensor_thresholds(1:2) > shock_sensor_thresholds(3:4)) .or. &
+        any(shock_sensor_thresholds(3:4) > shock_sensor_thresholds(5:6)) .or. &
+        shock_sensor_thresholds(7) < 1.0d0) then
+      call parameter_error(file_name, 0, 'umbrales del sensor: 0 < WENO3 <= TVD <= Godunov; atmosfera >= 1')
     end if
     if (riemann_solver_id /= RS_HLLE .and. riemann_solver_id /= RS_HLLC) then
       call parameter_error(file_name, 0, 'identificador de solucionador de Riemann invalido')
@@ -540,7 +566,14 @@ contains
         call parameter_error(file_name, 0, 'parametros invalidos para convergencia')
       end if
     case(7)
-      if (bh_mass <= 0.0d0 .or. michel_critical_radius <= 1.5d0*bh_mass .or. &
+      if (adb_idx > 2.0d0) then
+        call parameter_error(file_name, 0, 'Michel requiere 1 < adiabatic_index <= 2')
+      end if
+      if (trim(metric_type) == 'Minkowski' .or. abs(a_spin) > 0.0d0) then
+        call parameter_error(file_name, 0, 'Michel requiere un fondo Schwarzschild sin spin')
+      end if
+      if (bh_mass <= 0.0d0 .or. &
+          michel_critical_radius <= 0.5d0*bh_mass*(3.0d0+1.0d0/(adb_idx-1.0d0)) .or. &
           michel_critical_density <= 0.0d0) then
         call parameter_error(file_name, 0, 'parametros invalidos para acrecion de Michel')
       end if
@@ -719,7 +752,10 @@ contains
     select case(trim(key))
     case('restart', 'restart_file', 'final_time', 'cfl', 'save_interval', &
          'checkpoint_interval', 'output_prefix', 'output_folder', 'vtk_mapping', &
-         'shock_sensor', &
+         'shock_sensor', 'numerical_diagnostics', &
+         'sensor_pressure_weno3', 'sensor_density_weno3', &
+         'sensor_pressure_tvd', 'sensor_density_tvd', &
+         'sensor_pressure_godunov', 'sensor_density_godunov', 'sensor_atmosphere_factor', &
          'extract_gw', 'extract_mdot', 'ppi_diagnostics', 'diagnostic_stride', &
          'extraction_stride', 'mass_monitor_stride', &
          'perturbation', 'perturbation_seed', 'perturbation_time', &

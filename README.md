@@ -1,6 +1,8 @@
-# GRHD2
+# GRIAL
 
-Este README funciona como manual de usuario y desarrollo de GRHD2. Describe cómo compilar, configurar, ejecutar, verificar y extender el código contenido en este repositorio; su fuente son las rutinas Fortran y las pruebas versionadas en `tests/`.
+**General Relativistic Instability Accretion Laboratory**
+
+Este README funciona como manual de usuario y desarrollo de GRIAL. Describe cómo compilar, configurar, ejecutar, verificar y extender el código contenido en este repositorio; su fuente son las rutinas Fortran y las pruebas versionadas en `tests/`.
 
 > **Estado físico:** GRHD para un fluido perfecto sobre una métrica analítica fija. No es GRMHD, no evoluciona el espacio-tiempo y no incluye autogravedad del fluido. La salida `GW_signal.dat` es un proxy cuadrupolar Finn--Evans de campo débil, no un *strain* observable ni una extracción gauge-invariant.
 
@@ -32,7 +34,20 @@ Desde la raíz del repositorio:
 make -j
 ```
 
-El ejecutable resultante es `grhd2`. Las banderas de producción actuales son `-O3`, OpenMP, optimización específica de la máquina y LTO. Para una auditoría de memoria o punto flotante conviene reemplazar temporalmente `FFLAGS` por las banderas de depuración comentadas en el `Makefile`.
+El ejecutable resultante es `grial`. Las banderas de producción actuales son `-O3`, OpenMP, optimización específica de la máquina y LTO. Para una auditoría de memoria o punto flotante conviene reemplazar temporalmente `FFLAGS` por las banderas de depuración comentadas en el `Makefile`.
+
+`make` también crea el alias `grhd2` para los lanzadores existentes; ambos nombres ejecutan el mismo binario. El programa principal y su archivo fuente se llaman `grial` y `grial.f90`.
+
+Para obtener la versión publicada en una carpeta nueva:
+
+```bash
+git clone https://github.com/RuelasF/GRIAL.git
+cd GRIAL
+make -j4 ARCH_FLAGS=''
+make test ARCH_FLAGS=''
+```
+
+En CADS se usa `~/Proyecto/GRIAL` y en Zotz `~/Codigo/GRIAL`. Para futuras actualizaciones de estos clones, comprobar primero `git status`, ejecutar `git pull --ff-only` y recompilar con `make clean` y `make -j4 ARCH_FLAGS=''`. Las campañas deben conservar sus propias fuentes y binarios congelados; actualizar un clon de desarrollo no actualiza una corrida en curso.
 
 ### 2.1 OpenACC en NVIDIA P100
 
@@ -42,15 +57,15 @@ Para Tesla P100 (Pascal GP100, capacidad de cómputo 6.0):
 
 ```bash
 make openacc-p100
-./grhd2 --check ejemplo.par
-CUDA_VISIBLE_DEVICES=0 ./grhd2 ejemplo.par
+./grial --check ejemplo.par
+CUDA_VISIBLE_DEVICES=0 ./grial ejemplo.par
 ```
 
 Para una prueba funcional en una RTX 4070 de Zotz (Ada, capacidad 8.9):
 
 ```bash
 make openacc-rtx4070
-CUDA_VISIBLE_DEVICES=0 ./grhd2 ejemplo.par
+CUDA_VISIBLE_DEVICES=0 ./grial ejemplo.par
 ```
 
 La RTX 4070 admite instrucciones FP64 y permite comprobar que los kernels funcionan, pero su hardware está orientado a FP32/IA y no representa el rendimiento FP64 de una P100. Una GTX 1050 Ti también ejecuta CUDA y FP64, pero su capacidad de cómputo es 6.1 y su rendimiento de doble precisión es demasiado bajo para usarla como referencia de desempeño. La validación final del target `openacc-p100` debe hacerse sobre una P100 con una versión de NVIDIA HPC SDK que aún genere código `cc60`.
@@ -71,8 +86,8 @@ La rama incluye un benchmark del jet axisimétrico con la malla nominal `320 x 1
 En una máquina con `gfortran`, NVIDIA HPC SDK, controlador NVIDIA y una P100 visible, basta ejecutar:
 
 ```bash
-git clone --branch openacc-p100-soa --single-branch git@github.com:RuelasF/GRHD.git
-cd GRHD
+git clone git@github.com:RuelasF/GRIAL.git
+cd GRIAL
 CPU_THREADS=20 GPU_ID=0 make benchmark-jet-p100
 ```
 
@@ -102,14 +117,14 @@ final_time = 1000.0
 Compruebe el archivo sin iniciar la simulación:
 
 ```bash
-./grhd2 --check ejemplo.par
+./grial --check ejemplo.par
 ```
 
 Si la validación termina correctamente, ejecute:
 
 ```bash
 export OMP_NUM_THREADS=8
-./grhd2 ejemplo.par
+./grial ejemplo.par
 ```
 
 `OMP_NUM_THREADS` debe ajustarse al equipo. El programa exige exactamente un archivo `.par`; no permite una ejecución válida sin argumentos.
@@ -118,7 +133,7 @@ Si la salida estándar se redirige a un `.log` y se quiere ver el progreso en ti
 
 ```bash
 export GFORTRAN_UNBUFFERED_ALL=y
-./grhd2 ejemplo.par >ejemplo.log 2>&1
+./grial ejemplo.par >ejemplo.log 2>&1
 ```
 
 El ejemplo genera un toro de Fishbone--Moncrief ecuatorial en Kerr--Schild con `a=0.9`, malla `400 x 1 x 200`, WENO5--HLLE y radio logarítmico. La salida se guarda, por defecto, en:
@@ -348,7 +363,7 @@ En un reinicio sólo pueden cambiarse controles de tiempo, salida, diagnósticos
 Antes de reiniciar, valide conjuntamente parámetros y checkpoint:
 
 ```bash
-./grhd2 --check reinicio.par
+./grial --check reinicio.par
 ```
 
 Los checkpoints son volcados binarios Fortran; deben tratarse como ligados a la versión del formato, precisión, compilador/arquitectura y forma del estado. Conserve siempre el código y manifiesto que los generaron.
@@ -405,10 +420,10 @@ Con `ny=1`, las masas y amplitudes integradas heredan una cuadratura polar de un
 
 `inundaciones.sh` automatiza la campaña ecuatorial destinada al congreso: EF con `a=0` y KS con `a=0,0.2,0.4,0.6,0.9`, cada fondo con MP5--HLLE y WENO5--HLLE. Todos los casos usan `800x1x400`, `t_final=5000 M`, ruido de presión de `1%` con semilla 3435 en `t=1000 M`, salidas VTK cada `50 M` y checkpoints cada `250 M`. El sensor de choques se desactiva para comparar los reconstructores sin degradación adaptativa.
 
-El controlador está diseñado para recibir el ejecutable `grhd2` ya compilado junto con el script; no requiere Git, Make ni un compilador en el servidor. Copia el binario como `inundaciones`, registra su SHA-256, genera y valida los doce `.par` con `--check` y sólo entonces inicia las simulaciones. Ejecuta seis casos simultáneos con un presupuesto total de 72 hilos; si el sistema expone menos de 72 pero al menos 60, usa 60. Para transferir los archivos y lanzar una ejecución que sobreviva al cierre de la terminal:
+El controlador está diseñado para recibir el ejecutable `grial` ya compilado junto con el script; no requiere Git, Make ni un compilador en el servidor. Copia el binario como `inundaciones`, registra su SHA-256, genera y valida los doce `.par` con `--check` y sólo entonces inicia las simulaciones. Ejecuta seis casos simultáneos con un presupuesto total de 72 hilos; si el sistema expone menos de 72 pero al menos 60, usa 60. Para transferir los archivos y lanzar una ejecución que sobreviva al cierre de la terminal:
 
 ```bash
-scp grhd2 inundaciones.sh usuario@servidor:/ruta/campana/
+scp grial inundaciones.sh usuario@servidor:/ruta/campana/
 # Ya en /ruta/campana del servidor:
 bash inundaciones.sh --detach
 ```
@@ -428,7 +443,7 @@ Este barrido conserva `r_in`, `r_pmax` y `K`, no la masa o la densidad máxima i
 El lanzador `inundaciones_weno3.sh` reproduce los mismos seis fondos exclusivamente con WENO3--HLLE en otro directorio, `inundaciones_ppi_weno3_800_t5000`. Está configurado para usar exactamente 27 hilos: ejecuta tres casos simultáneos con 9 hilos cada uno y completa la matriz en dos tandas. Conserva la misma malla, perturbación, tiempos, salidas y reglas de reanudación. Como este lanzador reutiliza el controlador general, al segundo servidor se transfieren el ejecutable y ambos scripts:
 
 ```bash
-scp grhd2 inundaciones.sh inundaciones_weno3.sh usuario@servidor:/ruta/campana/
+scp grial inundaciones.sh inundaciones_weno3.sh usuario@servidor:/ruta/campana/
 # Ya en /ruta/campana del servidor:
 bash inundaciones_weno3.sh --detach
 ```
@@ -437,9 +452,9 @@ Su log general queda en `../inundaciones_ppi_weno3_800_t5000/logs/inundaciones.d
 
 ### 6.3 Campaña WENO3 mediante Slurm
 
-Para el cluster administrado por Slurm se proporciona un flujo separado que no utiliza el nombre histórico de la campaña. `submit_ppi_weno3.sh` reutiliza el ejecutable `grhd2` compilado previamente y envía dos arreglos de tres casos. La segunda tanda tiene una dependencia `afterok` de la primera, por lo que sólo se libera cuando EF `a=0` y KS `a=0,0.2` terminaron correctamente; entonces Slurm solicita recursos para KS `a=0.4,0.6,0.9`. Cada tarea usa por omisión 8 CPU OpenMP y las seis simulaciones conservan WENO3--HLLE, la malla exploratoria `400x1x200`, `t_final=5000 M` y la perturbación en `t=1000 M`.
+Para el cluster administrado por Slurm se proporciona un flujo separado que no utiliza el nombre histórico de la campaña. `submit_ppi_weno3.sh` reutiliza el ejecutable `grial` compilado previamente y envía dos arreglos de tres casos. La segunda tanda tiene una dependencia `afterok` de la primera, por lo que sólo se libera cuando EF `a=0` y KS `a=0,0.2` terminaron correctamente; entonces Slurm solicita recursos para KS `a=0.4,0.6,0.9`. Cada tarea usa por omisión 8 CPU OpenMP y las seis simulaciones conservan WENO3--HLLE, la malla exploratoria `400x1x200`, `t_final=5000 M` y la perturbación en `t=1000 M`.
 
-Desde una sesión interactiva donde `grhd2` ya se haya compilado y probado, la campaña completa se envía con un solo comando:
+Desde una sesión interactiva donde `grial` ya se haya compilado y probado, la campaña completa se envía con un solo comando:
 
 ```bash
 WALLTIME=3-00:00:00 CPUS_PER_CASE=8 bash submit_ppi_weno3.sh
@@ -456,7 +471,7 @@ Los mensajes del planificador quedan en `slurm_logs/` y los resultados predeterm
 
 El lanzador pasa la ruta absoluta del clon como `GRHD_REPO_ROOT` y fija allí el directorio de trabajo con `sbatch --chdir`. Esto es necesario porque Slurm ejecuta una copia temporal del `.sbatch` desde su área de *spool*: dentro de un trabajo no debe deducirse la ubicación del repositorio a partir de `BASH_SOURCE[0]`. Ni Git, Make ni el compilador se invocan dentro de los trabajos de evolución.
 
-Antes de enviar la campaña completa puede probarse el mismo patrón empleado por los trabajos validados de OllinSphere: compilar `grhd2` en la sesión interactiva y enviar directamente un arreglo que sólo usa el binario. `ppi_weno3_smoke.sbatch` ejecuta EF `a=0` y KS `a=0,0.2` simultáneamente, con dos CPU por caso, malla `80x1x40` y `t_final=0.5`. Los resultados se aíslan en `ppi_weno3_smoke/job_ARRAYID/` y no pueden mezclarse con la campaña científica:
+Antes de enviar la campaña completa puede probarse el mismo patrón empleado por los trabajos validados de OllinSphere: compilar `grial` en la sesión interactiva y enviar directamente un arreglo que sólo usa el binario. `ppi_weno3_smoke.sbatch` ejecuta EF `a=0` y KS `a=0,0.2` simultáneamente, con dos CPU por caso, malla `80x1x40` y `t_final=0.5`. Los resultados se aíslan en `ppi_weno3_smoke/job_ARRAYID/` y no pueden mezclarse con la campaña científica:
 
 ```bash
 mkdir -p slurm_logs
@@ -503,6 +518,11 @@ Cobertura actual:
 - `test-acc-reconstruction`: equivalencia en CPU de la reconstrucción por caras con la ruta de tiras, para los cinco métodos, sensores A/B y perfiles suaves/discontinuos.
 - `test-acc-rhs`: equivalencia del RHS CPU/OpenACC para los cinco reconstructores, HLLE/HLLC y geometría plana/curva.
 - `test-output`: construcción segura de nombres VTK largos dentro de los límites públicos de configuración.
+- `test-numerical-diagnostics`: conteos de reconstrucción, fallback y reparaciones de estados.
+- `test-spatial-order`: orden de reconstrucción en perfiles suaves y condiciones del sensor.
+- `test-sensor-boundaries`: stencil completo y conservación de estados uniformes cerca de fronteras.
+- `test-sensor-symmetry`: sensor centrado en la cara y equivalencia de decisiones bajo reflexión.
+- `test-khi-diagnostics`: diagnósticos de modos y simetría del dato inicial KHI.
 
 Estas pruebas no sustituyen campañas de convergencia ni validación física. Antes de publicar resultados deben registrarse compilador, banderas, commit, archivo `.par`, número de hilos y salida completa de las pruebas.
 
@@ -540,7 +560,7 @@ La implementación GRHD puede usarse como referencia de regresión para GRMHD si
 | `evolution.f90` | Reconstrucción por dirección y suma del RHS |
 | `output.f90` | VTK, checkpoints, manifiesto y diagnósticos |
 | `initialization.f90` | Presets, malla y caché geométrica |
-| `grhd2.f90` | Arranque, SSP-RK3 y bucle principal |
+| `grial.f90` | Arranque, SSP-RK3 y bucle principal |
 
 Flujo de una corrida:
 
@@ -641,7 +661,7 @@ Los directorios de producción, VTK, checkpoints y logs están excluidos de Git.
 Debe proporcionar un archivo:
 
 ```bash
-./grhd2 archivo.par
+./grial archivo.par
 ```
 
 ### Se rechaza una clave válida para otro problema

@@ -67,7 +67,7 @@ case "${1:-}" in
     ;;
 esac
 
-SOURCE_EXECUTABLE="${GRHD_EXECUTABLE:-$SCRIPT_DIR/grhd2}"
+SOURCE_EXECUTABLE="${GRHD_EXECUTABLE:-$SCRIPT_DIR/grial}"
 readonly PARAMETER_ROOT="$CAMPAIGN_ROOT/parameters"
 readonly RESULT_ROOT="$CAMPAIGN_ROOT/results"
 readonly LOG_ROOT="$CAMPAIGN_ROOT/logs"

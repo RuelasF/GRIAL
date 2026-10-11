@@ -1,7 +1,7 @@
 ! =======================================================================================
 ! Modulo: parameters
 ! ---------------------------------------------------------------------------------------
-! Lector de archivos de parametros de GRHD2. El formato es deliberadamente sencillo:
+! Lector de archivos de parametros de GRIAL. El formato es deliberadamente sencillo:
 !
 !   nombre = valor       # comentario opcional
 !

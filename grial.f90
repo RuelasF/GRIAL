@@ -1,12 +1,12 @@
 ! =======================================================================================
-! PROGRAMA PRINCIPAL: GRHD2 (General Relativistic Hydrodynamics 2D/3D)
+! PROGRAMA PRINCIPAL: GRIAL (General Relativistic Instability Accretion Laboratory)
 ! ---------------------------------------------------------------------------------------
 ! Orquestador central de la simulación. Controla el bucle temporal principal, la
 ! integración espacial mediante el Método de Líneas (Method of Lines) delegada al
 ! módulo 'evolution', la actualización temporal usando Runge-Kutta SSP de 3er orden,
 ! y el paralelismo de memoria compartida masivo (OpenMP).
 ! =======================================================================================
-program grhd2
+program grial
   use variables
   use parameters
   use metrics
@@ -45,15 +45,16 @@ program grhd2
     call get_command_argument(1, first_argument)
     call get_command_argument(2, parameter_file)
     if (trim(first_argument) /= '--check') then
-      write(*,*) 'Uso: ./grhd2 [--check] archivo.par'
+      write(*,*) 'Uso: ./grial [--check] archivo.par'
       error stop 1
     end if
     check_only = .true.
   else
-    write(*,*) 'Uso: ./grhd2 [--check] archivo.par'
+    write(*,*) 'Uso: ./grial [--check] archivo.par'
     error stop 1
   end if
 
+  write(*,'(A)') 'GRIAL: General Relativistic Instability Accretion Laboratory'
   call read_parameter_header(trim(parameter_file))
   start_time = wall_time_seconds()
 
@@ -448,4 +449,4 @@ program grhd2
     deallocate(alpha_f_z,beta_f_z,gamma_f_z,sqrt_gamma_f_z)
   end if
 
-end program grhd2
+end program grial

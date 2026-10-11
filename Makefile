@@ -1,5 +1,5 @@
 # ==========================================
-# Makefile para Simulador GRHD2
+# Makefile para GRIAL (General Relativistic Instability Accretion Laboratory)
 # ==========================================
 
 # Compilador y Banderas de optimización
@@ -9,8 +9,15 @@ FFLAGS = -O3 -fopenmp $(ARCH_FLAGS) -flto=auto -fno-math-errno -fno-trapping-mat
 #FFLAGS = -fopenmp -O0 -g -fbacktrace -Wall -Wextra -fcheck=all -finit-real=snan -ffpe-trap=invalid,zero,overflow,underflow,denormal
 
 # Nombre del ejecutable final
-TARGET = grhd2
-.DEFAULT_GOAL := $(TARGET)
+TARGET = grial
+.DEFAULT_GOAL := all
+
+.PHONY: all grhd2
+all: $(TARGET) grhd2
+
+# Compatibilidad con lanzadores anteriores; el ejecutable principal es grial.
+grhd2: $(TARGET)
+	ln -sfn $(TARGET) $@
 TEST_HLLC_TARGET = tests/test_hllc_fluxes
 TEST_GW_GEOMETRY_TARGET = tests/test_gw_geometry
 TEST_GW_STRESS_TARGET = tests/test_gw_stress
@@ -35,19 +42,19 @@ TEST_MICHEL_INITIAL_TARGET = tests/test_michel_initial
 # Ejecutable transferible para Intel Xeon E5 v4 (Broadwell-EP).
 server-broadwell:
 	$(MAKE) clean
-	$(MAKE) ARCH_FLAGS='-march=broadwell -mtune=broadwell' $(TARGET)
+	$(MAKE) ARCH_FLAGS='-march=broadwell -mtune=broadwell' all
 
 # NVIDIA Tesla P100 = Pascal, compute capability 6.0. No se usa -fast ni
 # precisiones mixtas: todos los real*8 permanecen en IEEE FP64.
 openacc-p100:
 	$(MAKE) clean
-	$(MAKE) FC=nvfortran FFLAGS='-O3 -acc=gpu -gpu=cc60,lineinfo -Minfo=accel -Mfree -Mextend -cpp -DUSE_OPENACC' $(TARGET)
+	$(MAKE) FC=nvfortran FFLAGS='-O3 -acc=gpu -gpu=cc60,lineinfo -Minfo=accel -Mfree -Mextend -cpp -DUSE_OPENACC' all
 
 # Compilación funcional para Zotz/RTX 4070 (Ada, CC 8.9). Conserva FP64;
 # sirve para validar kernels, pero no representa el rendimiento FP64 de P100.
 openacc-rtx4070:
 	$(MAKE) clean
-	$(MAKE) FC=nvfortran FFLAGS='-O3 -acc=gpu -gpu=cc89,lineinfo -Minfo=accel -Mfree -Mextend -cpp -DUSE_OPENACC' $(TARGET)
+	$(MAKE) FC=nvfortran FFLAGS='-O3 -acc=gpu -gpu=cc89,lineinfo -Minfo=accel -Mfree -Mextend -cpp -DUSE_OPENACC' all
 
 # Compila CPU y P100, ejecuta el mismo jet y compara tiempos y campos finales.
 benchmark-jet-p100:
@@ -65,7 +72,7 @@ OBJS = variables.o \
        reconstruction.o \
        evolution.o \
        accelerator.o \
-       grhd2.o
+       grial.o
 
 # Regla principal para construir el ejecutable
 $(TARGET): $(OBJS)
@@ -169,8 +176,8 @@ fluxes.o: variables.o equations.o metrics.o
 reconstruction.o: variables.o
 evolution.o: variables.o reconstruction.o fluxes.o equations.o
 accelerator.o: variables.o
-grhd2.o: variables.o parameters.o metrics.o initialization.o conditions.o equations.o fluxes.o reconstruction.o evolution.o accelerator.o output.o
+grial.o: variables.o parameters.o metrics.o initialization.o conditions.o equations.o fluxes.o reconstruction.o evolution.o accelerator.o output.o
 
 # Limpiar archivos compilados (comando: make clean)
 clean:
-	rm -f *.o *.mod $(TARGET) $(TEST_HLLC_TARGET) $(TEST_GW_GEOMETRY_TARGET) $(TEST_GW_STRESS_TARGET) $(TEST_FM_TARGET) $(TEST_POLAR_TARGET) $(TEST_CFL_TARGET) $(TEST_MINKOWSKI_SPHERICAL_TARGET) $(TEST_CASE_CORRECTIONS_TARGET) $(TEST_CHECKPOINT_TARGET) $(TEST_OUTPUT_TARGET) $(TEST_ACC_RECON_TARGET) $(TEST_ACC_RHS_TARGET) $(TEST_NUMERICAL_TARGET) $(TEST_SPATIAL_TARGET) $(TEST_SENSOR_BOUNDARY_TARGET) $(TEST_SENSOR_SYMMETRY_TARGET) $(TEST_KHI_DIAGNOSTICS_TARGET) $(TEST_MICHEL_INITIAL_TARGET)
+	rm -f *.o *.mod $(TARGET) grhd2 $(TEST_HLLC_TARGET) $(TEST_GW_GEOMETRY_TARGET) $(TEST_GW_STRESS_TARGET) $(TEST_FM_TARGET) $(TEST_POLAR_TARGET) $(TEST_CFL_TARGET) $(TEST_MINKOWSKI_SPHERICAL_TARGET) $(TEST_CASE_CORRECTIONS_TARGET) $(TEST_CHECKPOINT_TARGET) $(TEST_OUTPUT_TARGET) $(TEST_ACC_RECON_TARGET) $(TEST_ACC_RHS_TARGET) $(TEST_NUMERICAL_TARGET) $(TEST_SPATIAL_TARGET) $(TEST_SENSOR_BOUNDARY_TARGET) $(TEST_SENSOR_SYMMETRY_TARGET) $(TEST_KHI_DIAGNOSTICS_TARGET) $(TEST_MICHEL_INITIAL_TARGET)

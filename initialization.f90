@@ -394,7 +394,7 @@ contains
   end subroutine precalculate_metric_cache
 
   ! Subrutina: initialize_problem
-  ! Punto de entrada principal invocado desde grhd2.f90.
+  ! Punto de entrada principal invocado desde grial.f90.
   ! Orquesta la llamada a todas las rutinas de setup en el orden topológico correcto.
   subroutine initialize_problem(parameter_file, check_only)
     character(len=*), intent(in) :: parameter_file

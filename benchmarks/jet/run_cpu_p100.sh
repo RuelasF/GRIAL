@@ -89,9 +89,9 @@ metadata="$result_root/system.txt"
 if $run_cpu; then
   printf '[1/4] Compilando referencia OpenMP CPU...\n'
   make -C "$repo_root" clean
-  make -C "$repo_root" grhd2
-  cp "$repo_root/grhd2" "$result_root/bin/grhd2_cpu"
-  "$result_root/bin/grhd2_cpu" --check "$parameter_file" >"$result_root/cpu/check.log" 2>&1
+  make -C "$repo_root" grial
+  cp "$repo_root/grial" "$result_root/bin/grial_cpu"
+  "$result_root/bin/grial_cpu" --check "$parameter_file" >"$result_root/cpu/check.log" 2>&1
 
   printf '[2/4] Ejecutando jet CPU con %s hilos...\n' "$cpu_threads"
   cpu_start=$(python3 -c 'import time; print(time.monotonic_ns())')
@@ -99,7 +99,7 @@ if $run_cpu; then
     cd "$result_root/cpu"
     env OMP_NUM_THREADS="$cpu_threads" OMP_DYNAMIC=FALSE OMP_PROC_BIND=close \
       OMP_PLACES=cores GFORTRAN_UNBUFFERED_ALL=y \
-      "$result_root/bin/grhd2_cpu" "$parameter_file" >run.log 2>&1
+      "$result_root/bin/grial_cpu" "$parameter_file" >run.log 2>&1
   )
   cpu_end=$(python3 -c 'import time; print(time.monotonic_ns())')
   awk -v start="$cpu_start" -v finish="$cpu_end" \
@@ -110,8 +110,8 @@ fi
 if $run_gpu; then
   printf '[3/4] Compilando backend OpenACC para Tesla P100 (cc60, FP64)...\n'
   make -C "$repo_root" openacc-p100
-  cp "$repo_root/grhd2" "$result_root/bin/grhd2_p100"
-  CUDA_VISIBLE_DEVICES="$gpu_id" "$result_root/bin/grhd2_p100" --check "$parameter_file" \
+  cp "$repo_root/grial" "$result_root/bin/grial_p100"
+  CUDA_VISIBLE_DEVICES="$gpu_id" "$result_root/bin/grial_p100" --check "$parameter_file" \
     >"$result_root/gpu/check.log" 2>&1
 
   printf '[4/4] Ejecutando jet en la P100 %s...\n' "$gpu_id"
@@ -119,7 +119,7 @@ if $run_gpu; then
   (
     cd "$result_root/gpu"
     env CUDA_VISIBLE_DEVICES="$gpu_id" \
-      "$result_root/bin/grhd2_p100" "$parameter_file" >run.log 2>&1
+      "$result_root/bin/grial_p100" "$parameter_file" >run.log 2>&1
   )
   gpu_end=$(python3 -c 'import time; print(time.monotonic_ns())')
   awk -v start="$gpu_start" -v finish="$gpu_end" \

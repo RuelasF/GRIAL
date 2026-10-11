@@ -1,6 +1,7 @@
 # --- Compilación de Fortran ---
 *.o
 *.mod
+grial
 grhd2
 tests/test_hllc_fluxes
 tests/test_gw_geometry

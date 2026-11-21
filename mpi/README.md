@@ -1,6 +1,8 @@
 # GRIAL hidrodinámico con MPI y OpenMP
 
-Esta carpeta contiene el ejecutable CPU distribuido. Para toros 3D,
+Esta carpeta contiene la implementación hidrodinámica de referencia de GRIAL en `main`.
+Compila con OpenMP para un proceso o con MPI y OpenMP para varios procesos.
+Para toros 3D,
 `--grid NR NTHETA` reparte radio y ángulo polar y conserva el azimut completo en
 cada bloque. El producto de los dos números debe coincidir con el número de rangos.
 Los casos 1D y el jet x–z se reparten en el primer eje.
@@ -12,8 +14,8 @@ Instala GNU Fortran, Make, Python 3 y Open MPI con su paquete de desarrollo
 Desde una cuenta de usuario normal, ejecuta lo siguiente.
 
 ```bash
-git clone --single-branch --branch mpi-hidro https://github.com/RuelasF/GRIAL.git GRIAL-mpi
-cd GRIAL-mpi/mpi
+git clone --single-branch --branch main https://github.com/RuelasF/GRIAL.git
+cd GRIAL/mpi
 make -j2 USE_MPI=1 ARCH_FLAGS=''
 OMP_NUM_THREADS=1 mpirun -n 2 ./grial_mpi --distributed benchmarks/mpi_reference/sod.par --grid 2 1
 ```
@@ -24,6 +26,14 @@ Para otra corrida, selecciona un nuevo `output_folder` en el archivo de parámet
 `OMP_NUM_THREADS` controla los hilos **por rango**. Esta entrada requiere
 `numerical_diagnostics=true`, cadencias de diagnósticos y extracción positivas
 y que el presupuesto radial de la entrada serial esté desactivado.
+
+Para compilar y ejecutar en un solo proceso, bastan GNU Fortran y Make.
+Usa un directorio de salida distinto si ya ejecutaste el caso MPI.
+
+```bash
+make -j2 ARCH_FLAGS=''
+OMP_NUM_THREADS=4 ./grial benchmarks/mpi_reference/sod.par
+```
 
 Para probar compilación y ejecución con Sod, toro 3D y reinicio con otro reparto:
 
@@ -58,8 +68,8 @@ de tiempo calculado sobre la geometría fija. La opción viene desactivada y
 agrega el sufijo `_cfl_cache` al ejecutable. `PROFILE=1` construye el perfilador
 `grial_mpi_profile` y requiere `OVERLAP=0`.
 
-Desde un clon existente de la rama `mpi-hidro`, ejecuta `git pull --ff-only`
-y recompila la variante deseada desde `mpi/`.
+Para actualizar la versión de referencia, apunta tu clon a `main`, ejecuta
+`git pull --ff-only` y recompila la variante deseada desde `mpi/`.
 
 La regresión `make USE_MPI=1 ARCH_FLAGS='' test` puede ejecutarse en el clon
 público. Las autopruebas del controlador de campañas largas de SRHD requieren

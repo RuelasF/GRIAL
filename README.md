@@ -2,7 +2,18 @@
 
 **General Relativistic Instability Accretion Laboratory**
 
-Este README funciona como manual de usuario y desarrollo de GRIAL. Describe cómo compilar, configurar, ejecutar, verificar y extender el código contenido en este repositorio; su fuente son las rutinas Fortran y las pruebas versionadas en `tests/`.
+La implementación hidrodinámica de referencia en `main` está en [`mpi/`](mpi/README.md).
+Comparte el núcleo entre OpenMP en un proceso y la ejecución distribuida con MPI y OpenMP.
+El manual de la raíz documenta también el ejecutable anterior que usan campañas históricas.
+
+Para compilar la versión de referencia desde un clon de `main`:
+
+```bash
+make -C mpi -j2 ARCH_FLAGS=''           # mpi/grial, OpenMP
+make -C mpi -j2 USE_MPI=1 ARCH_FLAGS='' # mpi/grial_mpi, MPI y OpenMP
+```
+
+La [guía hidrodinámica](mpi/README.md) incluye casos de prueba, reinicios y opciones de intercambio de halos. La rama `grmhd` queda reservada para el desarrollo magnético experimental.
 
 > **Estado físico:** GRHD para un fluido perfecto sobre una métrica analítica fija. No es GRMHD, no evoluciona el espacio-tiempo y no incluye autogravedad del fluido. La salida `GW_signal.dat` es un proxy cuadrupolar Finn--Evans de campo débil, no un *strain* observable ni una extracción gauge-invariant.
 
@@ -26,7 +37,7 @@ sudo apt install gfortran make
 
 La instalación de paquetes es una operación del sistema y no forma parte del `Makefile`.
 
-## 2. Compilación rápida
+## 2. Compilación del ejecutable histórico de la raíz
 
 Desde la raíz del repositorio:
 
@@ -49,9 +60,9 @@ make test ARCH_FLAGS=''
 
 En CADS se usa `~/Proyecto/GRIAL` y en Zotz `~/Codigo/GRIAL`. Para futuras actualizaciones de estos clones, comprobar primero `git status`, ejecutar `git pull --ff-only` y recompilar con `make clean` y `make -j4 ARCH_FLAGS=''`. Las campañas deben conservar sus propias fuentes y binarios congelados; actualizar un clon de desarrollo no actualiza una corrida en curso.
 
-### 2.1 OpenACC en NVIDIA P100
+### 2.1 OpenACC histórico en NVIDIA P100
 
-La rama `openacc-p100-soa` incluye un backend separado para GPU. Requiere NVIDIA HPC SDK y `nvfortran`; no utiliza OpenMP durante la evolución GPU. El estado hidrodinámico usa el orden `[x,y,z,variable]`, permanece residente en el dispositivo entre etapas RK y todos los estados, flujos, fuentes y conversiones usan `real*8` (FP64). No se habilitan `fastmath`, TF32, FP32 ni precisiones mixtas.
+El código histórico de la raíz incluye un backend separado para GPU. Requiere NVIDIA HPC SDK y `nvfortran`; no utiliza OpenMP durante la evolución GPU. El estado hidrodinámico usa el orden `[x,y,z,variable]`, permanece residente en el dispositivo entre etapas RK y todos los estados, flujos, fuentes y conversiones usan `real*8` (FP64). No se habilitan `fastmath`, TF32, FP32 ni precisiones mixtas.
 
 Para Tesla P100 (Pascal GP100, capacidad de cómputo 6.0):
 
@@ -81,7 +92,7 @@ watch -n 1 nvidia-smi
 
 #### Comparación reproducible CPU--P100 con el jet
 
-La rama incluye un benchmark del jet axisimétrico con la malla nominal `320 x 1 x 800`, WENO5--HLLE, FP64 y `shock_sensor = true`. Ambos ejecutables reciben el mismo archivo de parámetros y evolucionan hasta `t=2`; la prueba mide el tiempo de pared y compara todos los campos del VTK final mediante normas L1, L2, Linf y L2 relativa.
+El código histórico incluye un benchmark del jet axisimétrico con la malla nominal `320 x 1 x 800`, WENO5--HLLE, FP64 y `shock_sensor = true`. Ambos ejecutables reciben el mismo archivo de parámetros y evolucionan hasta `t=2`; la prueba mide el tiempo de pared y compara todos los campos del VTK final mediante normas L1, L2, Linf y L2 relativa.
 
 En una máquina con `gfortran`, NVIDIA HPC SDK, controlador NVIDIA y una P100 visible, basta ejecutar:
 

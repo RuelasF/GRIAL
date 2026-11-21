@@ -1,6 +1,7 @@
 ! CFL and temporal agreement; no fluid evolution, clocks or file writers.
 module parallel_timing
   use parallel_runtime
+  use, intrinsic :: iso_fortran_env, only: int64
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #ifdef USE_MPI
   use mpi_f08
@@ -8,7 +9,8 @@ module parallel_timing
   implicit none
   private
   public :: validate_cfl_context,reduce_causal_maxima,cfl_step_from_maxima, &
-            time_decisions,coordinate_time_actions,clip_step_to_target,any_time_request,validate_step_size
+            time_decisions,coordinate_time_actions,clip_step_to_target,any_time_request,validate_step_size, &
+            periodic_output_due,next_periodic_index
 
   type :: time_decisions
     logical :: perturb=.false.,save=.false.,checkpoint=.false.,stop=.false.,complete=.false.
@@ -157,6 +159,23 @@ contains
     if (step<=0.0d0) call parallel_abort('CFL time step does not advance')
   end function cfl_step_from_maxima
 
+  pure logical function periodic_output_due(time,deadline) result(due)
+    real*8, intent(in) :: time,deadline
+    due=deadline-time<=4.0d0*epsilon(1.0d0)*max(abs(time),abs(deadline))
+  end function periodic_output_due
+
+  integer(int64) function next_periodic_index(time,interval) result(slot)
+    real*8, intent(in) :: time,interval
+    real*8 :: cycles
+    if (interval<1.0d0) then
+      if (time>huge(1.0d0)*interval) call parallel_abort('periodic output index overflow')
+    end if
+    cycles=time/interval
+    if (cycles>=real(huge(slot),8)) call parallel_abort('periodic output index overflow')
+    slot=floor(cycles,kind=int64)+1_int64
+    if (periodic_output_due(time,dble(slot)*interval)) slot=slot+1_int64
+  end function next_periodic_index
+
   subroutine coordinate_time_actions(time,step,target,event_times,event_enabled,local_requests,decisions)
     real*8, intent(in) :: time,target,event_times(3)
     integer, intent(in) :: step
@@ -190,7 +209,9 @@ contains
       call parallel_check_mpi(status,'checkpoint and stop requests')
     end if
 #endif
-    due=event_enabled.and.time>=times
+    due(1)=event_enabled(1).and.time>=times(1)
+    due(2)=event_enabled(2).and.periodic_output_due(time,times(2))
+    due(3)=event_enabled(3).and.periodic_output_due(time,times(3))
     decisions%complete=time>=target
     decisions%perturb=due(1)
     decisions%save=due(2)

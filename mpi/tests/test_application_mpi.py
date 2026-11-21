@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -129,10 +130,36 @@ def main():
                 return work/info['checkpoint']
             assert records(checkpoint(a))==records(checkpoint(b)), (name,'legacy V9 records changed')
 
+    # Frequent wall checkpoints expose the persisted deadline before and after a
+    # physical checkpoint. Check what was written, independently of the solver's
+    # scheduling function. These fixtures stay well away from the FP64 edge.
+    calendar = out/'calendar';calendar.mkdir()
+    par = calendar/'case.par'
+    text = dict(cases())['sod_0'].replace('nx=73','nx=16').replace('checkpoint_interval=10','checkpoint_interval=0.04')
+    text = text.replace('walltime_checkpoint_seconds=0','walltime_checkpoint_seconds=1e-9')
+    par.write_text(text)
+    grid = (1,1) if args.serial else (2,1)
+    launch(calendar,'calendar',['--distributed',par,'--grid',*grid],grid)
+    current = status(calendar)
+    end_step = int(current['step'])
+    generations = sorted((calendar/current['checkpoint']).parent.glob('step_*/observer.bin'))
+    assert current['status']=='completed' and len(generations)==end_step > 3
+    deadlines = []
+    for step, observer in enumerate(generations,1):
+        magic, *header = struct.unpack_from('=16s12i2di2d',observer.read_bytes())
+        assert magic.rstrip()==b'GRIAL_OBSERVER1' and header[11]==step
+        time, next_save, next_checkpoint = header[12], header[15], header[16]
+        assert next_checkpoint == (int(time/0.04+1e-12)+1)*0.04, (step,time,next_checkpoint)
+        assert next_save == (int(time/0.05+1e-12)+1)*0.05, (step,time,next_save)
+        deadlines.append(next_checkpoint)
+    assert deadlines[:2]==[0.04,0.04] and deadlines[2]==0.08
+
     # Real wall-clock stop with progress, followed by a different process grid.
     if not args.smoke:
         text = dict(cases())['khi_0']
         text = text.replace('nx=37','nx=193').replace('nz=19','nz=97').replace('final_time=0.12','final_time=0.4')
+        text = text.replace('checkpoint_interval=10','checkpoint_interval=0.1')
+        text = text.replace('walltime_checkpoint_seconds=0','walltime_checkpoint_seconds=0.2')
         reference=out/'wall_reference';reference.mkdir();par=reference/'case.par';par.write_text(text)
         launch(reference,'continuous',['--distributed',par]);ref=status(reference);adapt_receipt(reference,ref)
         work=out/'wall_segmented';work.mkdir();par=work/'case.par';par.write_text(text)

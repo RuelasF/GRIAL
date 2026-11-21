@@ -238,9 +238,7 @@ contains
     integer :: i, j, k
 
     if (allocated(michel_injector)) then
-      if (size(michel_injector,2) /= nghost .or. &
-          size(michel_injector,3) /= ny .or. &
-          size(michel_injector,4) /= nz) deallocate(michel_injector)
+      if (any(shape(michel_injector) /= [nghost,ny,nz,neq])) deallocate(michel_injector)
     end if
     if (.not. allocated(michel_injector)) allocate(michel_injector(nghost,ny,nz,neq))
 

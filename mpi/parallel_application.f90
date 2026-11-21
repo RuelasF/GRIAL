@@ -2,7 +2,7 @@
 module parallel_application
   use variables
   use parallel_runtime
-  use parallel_timing, only: any_time_request,clip_step_to_target
+  use parallel_timing, only: any_time_request,clip_step_to_target,periodic_output_due,next_periodic_index
   use parallel_diagnostics, only: initialize_parallel_diagnostics,finalize_parallel_diagnostics
   use parallel_checkpoint, only: read_parallel_checkpoint_configuration,checkpoint_file_signature
   use parallel_observer
@@ -102,6 +102,8 @@ contains
     real*8,intent(in) :: start_wall
     type(domain_layout) :: layout
     type(observer_calendar) :: calendar
+    integer(int64) :: save_slot
+    logical :: physical_checkpoint_due
     character(len=512) :: source,arg,root,checkpoint_root,checkpoint,vtk_root,path,lock_path,status_path
     character(len=160) :: message
     character(len=24) :: reason
@@ -224,6 +226,10 @@ contains
     if(resume)then
       last_checkpoint=n_steps;last_vtk=n_steps;checkpoint=source
     end if
+    ! The real deadlines remain on disk for compatibility with existing observers.
+    save_slot=max(1_int64,nint(calendar%next_save/save_interval,kind=int64))
+    if(resume.and.periodic_output_due(integration_time,calendar%next_checkpoint)) &
+      calendar%next_checkpoint=dble(next_periodic_index(integration_time,checkpoint_interval))*checkpoint_interval
     call apply_parallel_perturbation(layout,injected)
     if(.not.resume)then
       call sample_parallel_observer(calendar,.true.);call vtk_now()
@@ -263,17 +269,21 @@ contains
 #else
       call sample_parallel_observer(calendar)
 #endif
-      if(integration_time>=calendar%next_save)then
+      if(periodic_output_due(integration_time,calendar%next_save))then
         call vtk_now()
-        calendar%next_save=calendar%next_save+save_interval;calendar%save_index=calendar%save_index+1_int64
+        save_slot=save_slot+1_int64
+        calendar%next_save=dble(save_slot)*save_interval
+        calendar%save_index=calendar%save_index+1_int64
       end if
-      checkpoint_requested=integration_time>=calendar%next_checkpoint
+      physical_checkpoint_due=periodic_output_due(integration_time,calendar%next_checkpoint)
+      checkpoint_requested=physical_checkpoint_due
       if(walltime_checkpoint_seconds>0.0d0)checkpoint_requested=checkpoint_requested.or. &
         wall_time_seconds()-last_checkpoint_wall>=walltime_checkpoint_seconds
       ! Wall clocks differ per rank: agree before entering collective checkpoint IO.
       checkpoint_requested=any_time_request(checkpoint_requested)
       if(checkpoint_requested)then
-        calendar%next_checkpoint=dble(int(integration_time/checkpoint_interval)+1)*checkpoint_interval
+        if(physical_checkpoint_due) &
+          calendar%next_checkpoint=dble(next_periodic_index(integration_time,checkpoint_interval))*checkpoint_interval
         call checkpoint_now();call publish_status()
       end if
       max_step=max(max_step,wall_time_seconds()-step_started)

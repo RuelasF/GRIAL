@@ -28,6 +28,7 @@ program test_parallel_timing
     call check_metric_partition(geometry)
   end do
   call check_requests()
+  call check_periodic_boundary()
   call check_timeline(0.25d0,0.5d0)
   call check_timeline(0.3d0,0.6d0)
   if (trim(mode)=='report') then
@@ -162,6 +163,24 @@ contains
     call require(dt==reference_dt,'partitioned metric CFL equals complete-grid CFL')
     call release_grid()
   end subroutine check_metric_partition
+
+  subroutine check_periodic_boundary()
+    real*8 :: interval,deadline,before_boundary
+    type(time_decisions) :: decisions
+
+    interval=0.1d0
+    deadline=43.0d0*interval
+    before_boundary=nearest(deadline,-1.0d0)
+    call require(periodic_output_due(before_boundary,deadline),'one ULP below the deadline is due')
+    call require(.not.periodic_output_due(deadline-1.0d-10,deadline),'an early sample is not due')
+    call require(next_periodic_index(deadline-1.0d-10,interval)==43_int64,'retain a future slot')
+    call require(next_periodic_index(before_boundary,interval)==44_int64,'advance past a rounded boundary')
+    call require(next_periodic_index(deadline,interval)==44_int64,'advance past a rounded quotient')
+    call require(next_periodic_index(0.0d0,interval)==1_int64,'first slot after initial output')
+    call coordinate_time_actions(before_boundary,7,6.0d0,[0.0d0,deadline,deadline], &
+      [.false.,.true.,.true.],[.false.,.false.],decisions)
+    call require(decisions%save.and.decisions%checkpoint,'VTK and checkpoint agree at a rounded boundary')
+  end subroutine check_periodic_boundary
 
   subroutine check_requests()
     type(time_decisions) :: decisions

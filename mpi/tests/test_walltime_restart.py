@@ -7,6 +7,8 @@ folder; --output selects an empty directory for campaign evidence.
 import argparse
 from array import array
 import json
+import math
+import re
 import os
 from pathlib import Path
 import struct
@@ -119,6 +121,18 @@ p_floor=7e-15
     error = max(abs(a-b) for a, b in zip(expected_values, actual_values))
     assert actual == expected, f'Segmented conserved state differs by {error}'
     assert struct.unpack('=4d', records(actual_final)[24]) == struct.unpack('=4d', r[24])
+
+    # Place the shock close to an outflow boundary so the mass changes between steps.
+    mass_case = run('mass_monitor', base.replace('nx=800','nx=64').replace('diagnostic_stride=5','diagnostic_stride=1')
+                    + 'sod_interface=0.03\nppi_diagnostics=true\nmass_monitor_stride=1\n')
+    log = (mass_case/'run.log').read_text()
+    masses = [float(value) for value in re.findall(r'Total Mass in domain:\s+(\S+)', log)]
+    diagnostics, = (mass_case/'native').glob('*/global_diagnostics.dat')
+    rows = [line.split() for line in diagnostics.read_text().splitlines() if line and not line.startswith('#')]
+    recorded = [float(row[1]) for row in rows[1:]]  # The first row is the initial state.
+    assert len(masses) == len(recorded) >= 2
+    assert max(recorded)-min(recorded) > 1e-8, 'Mass must vary to detect a one-step lag'
+    assert all(math.isclose(a,b,rel_tol=1e-13,abs_tol=1e-14) for a,b in zip(masses,recorded)), 'Mass monitor lags diagnostics'
 
     # All failed --check paths must reject missing records before evolving.
     # Initialization is included: an exhausted startup budget produces step zero.

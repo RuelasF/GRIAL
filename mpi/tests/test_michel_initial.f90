@@ -87,6 +87,30 @@ program test_michel_initial
   call require('outer injector physical density',p(nx+1,1,1,eq_de)>0.02d0)
   call require('inner outflow ghost',all(p(0,1,1,:)==p(1,1,1,:)))
   call require('boundary preparation preserves reference',maxval(abs(state(:,1,1,eq_de)/expected_rho-1.0d0))<tolerance)
+  ! A different lower bound marks the existing allocation through the cache refresh.
+  deallocate(michel_injector)
+  allocate(michel_injector(nghost,ny,nz,0:neq-1))
+  michel_injector = -1.0d0
+  call prepare_case_boundary_data()
+  call require('Michel cache reused for the same shape',lbound(michel_injector,4)==0)
+  call require('Michel cache refreshed',all(michel_injector==p(nx+1:nx+nghost,1:ny,1:nz,:)))
+
+  deallocate(p,x,y,z)
+  nghost=2;ny=2;nz=3
+  allocate(x(-nghost:nx+nghost),y(-nghost:ny+nghost),z(-nghost:nz+nghost))
+  allocate(p(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq))
+  x(1:nx)=radii
+  x(nx+1:nx+nghost)=[101.0d0,102.0d0]
+  y=pi/2.0d0;z=0.0d0
+  call prepare_case_boundary_data()
+  call require('Michel cache resized with the mesh',all(shape(michel_injector)==[nghost,ny,nz,neq]))
+  call require('Michel cache matches resized mesh',all(michel_injector==p(nx+1:nx+nghost,1:ny,1:nz,:)))
+
+  deallocate(michel_injector)
+  allocate(michel_injector(nghost,ny,nz,neq-1))
+  call prepare_case_boundary_data()
+  call require('Michel cache validates variable count',all(shape(michel_injector)==[nghost,ny,nz,neq]))
+  call require('Michel cache restores all variables',all(michel_injector==p(nx+1:nx+nghost,1:ny,1:nz,:)))
   if (failures /= 0) then
     write(*,*) 'MICHEL INITIAL TESTS FAILED: ',failures
     error stop 1

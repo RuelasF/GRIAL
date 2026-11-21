@@ -9,7 +9,7 @@
 program grial
   use parallel_runtime
   use parallel_application, only: agree_command_line,run_distributed_application
-  use parallel_timing, only: time_decisions,coordinate_time_actions,clip_step_to_target,any_time_request
+  use parallel_timing, only: time_decisions,coordinate_time_actions,clip_step_to_target,any_time_request,next_periodic_index
   use variables
   use parameters
   use metrics
@@ -31,6 +31,7 @@ program grial
   logical :: wall_stop_request,wall_checkpoint_request
   logical :: check_only, stopped_for_walltime
   integer :: last_checkpoint_step
+  integer(int64) :: save_slot
   real*8 :: last_wall_checkpoint, step_wall_start, max_step_wall, now_wall
   character(len=512) :: last_checkpoint_file
 
@@ -161,7 +162,7 @@ program grial
     call set_boundary_conditions(p)
     numerical_events=restart_events
     numerical_delta_u=restart_delta_u
-    next_checkpoint = dble(int(integration_time / checkpoint_interval) + 1) * checkpoint_interval
+    next_checkpoint = dble(next_periodic_index(integration_time,checkpoint_interval))*checkpoint_interval
   else
     ! --- ARRANQUE EN FRÍO NORMAL (T=0) ---
     integration_time = 0.0d0
@@ -202,7 +203,8 @@ program grial
   ! -------------------------------------------
   ! Mantiene el calendario absoluto de salidas al reiniciar; desplazarlo desde
   ! integration_time omitiría los frames nominales posteriores al checkpoint.
-  next_save_time = dble(int(integration_time/save_interval) + 1)*save_interval
+  save_slot = next_periodic_index(integration_time,save_interval)
+  next_save_time = dble(save_slot)*save_interval
   call update_adaptive_dt() ! Inicialización del primer dt
 
   session_start_time = integration_time
@@ -332,11 +334,11 @@ program grial
       ! Integral de volumen lógico 3D Coordenado
       ! (El Jacobiano dr/dx ya está matemáticamente embebido en el sqrt(gamma) dentro de u(eq_de))
         !$OMP PARALLEL DO REDUCTION(+:total_mass) PRIVATE(i, j, k)
-        !$ACC PARALLEL LOOP COLLAPSE(3) REDUCTION(+:total_mass) PRESENT(u)
+        !$ACC PARALLEL LOOP COLLAPSE(3) REDUCTION(+:total_mass) PRESENT(up)
         do k = 1, nz
           do j = 1, ny
             do i = 1, nx
-              total_mass = total_mass + u(i,j,k,eq_de) * dx * dy * dz
+              total_mass = total_mass + up(i,j,k,eq_de) * dx * dy * dz
             end do
           end do
         end do
@@ -380,7 +382,8 @@ program grial
     if (decisions%save) then
       call accelerator_update_host()
       call save_vtk_at_time(next_save_time)
-      next_save_time = next_save_time + save_interval
+      save_slot = save_slot+1_int64
+      next_save_time = dble(save_slot)*save_interval
     end if
 
     now_wall=wall_time_seconds()
@@ -390,7 +393,8 @@ program grial
     wall_checkpoint_request=any_time_request(wall_checkpoint_request)
     if (decisions%checkpoint.or.wall_checkpoint_request) then
       call checkpoint_now()
-      next_checkpoint = dble(int(integration_time/checkpoint_interval)+1)*checkpoint_interval
+      if (decisions%checkpoint) &
+        next_checkpoint = dble(next_periodic_index(integration_time,checkpoint_interval))*checkpoint_interval
     end if
     max_step_wall=max(max_step_wall,wall_time_seconds()-step_wall_start)
   end do

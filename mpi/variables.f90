@@ -1,0 +1,370 @@
+! =================================================================================
+! Módulo: variables
+! Descripción: Contenedor global de las variables de estado, parámetros físicos,
+! arreglos geométricos y banderas de control del simulador.
+!
+! Soporte Multi-Geometría:
+! Las variables espaciales x, y, z representan las dimensiones lógicas x1, x2, x3.
+! Su significado físico (Cartesianas, Cilíndricas o Esféricas) es dictaminado
+! dinámicamente por el módulo de métricas.
+!
+! Convención Geométrica Estándar (CFD):
+! - Celdas Físicas (Centros): Índices de [1 : nx] y [1 : nz]
+! - Interfaces (Caras):       Índices de [0 : nx] y [0 : nz]
+! - Celdas Fantasma (Ghosts): Índices [-nghost : 0] y [nx+1 : nx+nghost]
+! =================================================================================
+
+module variables
+    use, intrinsic :: iso_fortran_env, only: int64
+    implicit none
+    public
+
+    ! ==========================================================
+    ! ÍNDICES DE ECUACIONES (Vectores de Estado)
+    ! ==========================================================
+    integer, parameter :: neq = 5
+
+    integer, parameter :: eq_de = 1 ! D:  Densidad de masa en reposo conservada (rho * W * sqrt(gamma))
+    integer, parameter :: eq_pr = 2 ! tau: Densidad de energía conservada (excluyendo masa en reposo)
+    integer, parameter :: eq_vx = 3 ! S_1: Momento en la 1ra dimensión (ej. x, r)
+    integer, parameter :: eq_vy = 4 ! S_2: Momento en la 2da dimensión (ej. y, theta)
+    integer, parameter :: eq_vz = 5 ! S_3: Momento en la 3ra dimensión (ej. z, phi)
+
+    character(len=20), allocatable :: var_names(:)
+
+    ! ==========================================================
+    ! DOMINIO NUMÉRICO Y CONTROL TEMPORAL
+    ! ==========================================================
+    integer :: nx, ny, nz                   ! Número estricto de celdas FÍSICAS activas
+    ! Set by allocate_and_grid: nx/ny/nz then describe local physical cells.
+    integer :: nx_global=0, ny_global=0, nz_global=0, x_global_offset=0, y_global_offset=0
+    logical :: global_active_axes(3)=.false.
+    logical :: owns_lower_boundary(3)=.true., owns_upper_boundary(3)=.true.
+    integer :: idx_horizon_global=0, idx_probe_global=0
+    integer :: horizon_owner_rank=-1, probe_owner_rank=-1
+    real*8  :: x_min, x_max                 ! Límites físicos de la 1ra dimensión lógica
+    real*8  :: r_min, r_max                 ! Límites físicos de la 1ra dimensión física (r)
+    real*8  :: y_min, y_max                 ! Límites físicos de la 2da dimensión
+    real*8  :: z_min, z_max                 ! Límites físicos de la 3ra dimensión
+    real*8  :: dx, dy, dz                   ! Espaciado constante de la malla lógica
+
+    real*8  :: t, dt, final_time            ! Variables de integración temporal
+    real*8  :: integration_time             ! Tiempo actual de la simulación
+    real*8  :: CFL                          ! Número de Courant-Friedrichs-Lewy
+    integer :: n_steps = 0                  ! Contador total de pasos evaluados
+
+    ! CPU radial Michel budget; V9 preserves it across restarts, without changing evolution.
+    logical :: do_radial_mass_budget = .false.
+    real*8 :: radial_mass_flux(2) = 0.0d0
+    real*8 :: radial_mass_initial = 0.0d0, radial_mass_flux_integral(2) = 0.0d0
+
+    ! ==========================================================
+    ! ARREGLOS GEOMÉTRICOS DE LA MALLA (1D Arrays)
+    ! ==========================================================
+    real*8, allocatable :: x(:), y(:), z(:) ! Coordenadas en los centros celulares
+    real*8, allocatable :: x_face(:)        ! Coordenadas de las interfaces 1D
+    real*8, allocatable :: y_face(:)        ! Coordenadas de las interfaces 2D
+    real*8, allocatable :: z_face(:)        ! Coordenadas de las interfaces 3D
+
+    ! ==========================================================
+    ! ARREGLOS DE ESTADO (HIDRODINÁMICA)
+    ! Layout SoA apto para GPU: [x, y, z, variable]. El primer índice espacial
+    ! es contiguo, por lo que hilos vecinos de un warp leen direcciones vecinas.
+    ! ==========================================================
+    real*8, allocatable :: u(:,:,:,:)       ! Estado conservativo paso 'n'
+    real*8, allocatable :: up(:,:,:,:)      ! Estado intermedio/final paso 'n+1'
+    real*8, allocatable :: s(:,:,:,:)       ! Términos fuente
+    real*8, allocatable :: rhs(:,:,:,:)     ! Lado Derecho (RHS)
+    real*8, allocatable :: p(:,:,:,:)       ! Variables Primitivas
+
+    ! ==========================================================
+    ! ARREGLOS DE MÉTRICA PRE-CALCULADA (CACHÉ 3+1)
+    ! ==========================================================
+    ! 1. Evaluados en los CENTROS celulares (Para fuentes y conversión U -> P)
+    real*8, allocatable :: alpha_c(:,:,:)           ! Lapse function
+    real*8, allocatable :: beta_c(:,:,:,:)          ! Shift vector [1:3, x, y, z]
+    real*8, allocatable :: gamma_c(:,:,:,:,:)       ! Métrica espacial [1:3, 1:3, x, y, z]
+    real*8, allocatable :: gamma_inv_c(:,:,:,:,:)   ! Inversa métrica espacial [1:3, 1:3, x, y, z]
+    real*8, allocatable :: gmunu_c(:,:,:,:,:)       ! Inversa métrica espacio-temporal
+    real*8, allocatable :: sqrt_gamma_c(:,:,:)      ! Raíz del determinante
+    real*8, allocatable :: chris_c(:,:,:,:,:,:)     ! Símbolos de Christoffel (0:3, 0:3, 0:3, x, y, z)
+    real*8, allocatable :: dg_c(:,:,:,:,:,:)        ! Derivadas de la métrica (0:3, 0:3, 1:3, x, y, z)
+    real*8, allocatable :: dlna_c(:,:,:,:)          ! Derivada del logaritmo del lapso (0:3, x, y, z)
+
+    ! 2. Evaluados en las INTERFACES X (Para flujos F^x)
+    real*8, allocatable :: alpha_f_x(:,:,:)
+    real*8, allocatable :: beta_f_x(:,:,:,:)
+    real*8, allocatable :: gamma_f_x(:,:,:,:,:)
+    real*8, allocatable :: gmunu_f_x(:,:,:,:,:)
+    real*8, allocatable :: sqrt_gamma_f_x(:,:,:)
+
+    ! 3. Evaluados en las INTERFACES Y (Para flujos F^y)
+    real*8, allocatable :: alpha_f_y(:,:,:)
+    real*8, allocatable :: beta_f_y(:,:,:,:)
+    real*8, allocatable :: gamma_f_y(:,:,:,:,:)
+    real*8, allocatable :: gmunu_f_y(:,:,:,:,:)
+    real*8, allocatable :: sqrt_gamma_f_y(:,:,:)
+
+    ! 4. Evaluados en las INTERFACES Z (Para flujos F^z)
+    real*8, allocatable :: alpha_f_z(:,:,:)
+    real*8, allocatable :: beta_f_z(:,:,:,:)
+    real*8, allocatable :: gamma_f_z(:,:,:,:,:)
+    real*8, allocatable :: gmunu_f_z(:,:,:,:,:)
+    real*8, allocatable :: sqrt_gamma_f_z(:,:,:)
+
+    ! ==========================================================
+    ! DIRECCIONES DE BARRIDO (Dimensional Splitting)
+    ! ==========================================================
+    integer, parameter :: DIR_X = 1
+    integer, parameter :: DIR_Y = 2
+    integer, parameter :: DIR_Z = 3
+
+    ! ==========================================================
+    ! PARÁMETROS FÍSICOS Y TERMODINÁMICOS
+    ! ==========================================================
+    real*8 :: adb_idx                       ! Índice adiabático (Gamma)
+    real*8 :: g1                            ! Gamma / (Gamma - 1.0)
+    real*8 :: pi = acos(-1.0d0)
+
+    real*8 :: bh_mass = 0.0d0               ! Masa del Agujero Negro
+    real*8 :: a_spin  = 0.0d0               ! Parámetro de Espín de Kerr (a = J/M)
+
+    integer :: idx_horizon                  ! Índice del horizonte
+    integer :: idx_probe                    ! Índice celda monitoreo
+
+    ! ==========================================================
+    ! BANDERAS DE CONTROL GLOBAL
+    ! ==========================================================
+    character(len=20) :: geom_type               ! 'Cartesian', 'Cylindrical', 'Spherical', 'Spheroidal'
+    logical :: use_log_r = .false.               ! .true. comprime 1ra dimensión
+
+    character(len=30) :: metric_type             ! 'Minkowski', 'Eddington-Finkelstein', 'Kerr'
+
+    logical :: is_mhd = .false.                  ! Campos B (Futuro)
+    logical :: use_shock_sensor = .true.         ! Fallback reconstrucción
+    ! WENO3: presión/densidad; TVD: presión/densidad; Godunov: presión/densidad;
+    ! factor de atmósfera. A conserva exactamente los valores históricos.
+    real*8, parameter :: SENSOR_DEFAULTS(7) = [0.40d0,0.15d0,0.80d0,0.50d0,10.0d0,10.0d0,100.0d0]
+    real*8 :: shock_sensor_thresholds(7) = SENSOR_DEFAULTS
+
+    ! Banderas numéricas para los kernels. Evitan comparar cadenas y usar
+    ! punteros a procedimientos dentro del dispositivo OpenACC.
+    logical :: use_srhd_wavespeeds = .false.
+    logical :: flat_cartesian_sources = .false.
+    logical :: curved_metric = .true.
+    logical :: cylindrical_geometry = .false.
+    logical :: polar_geometry = .false.
+
+#ifdef USE_OPENACC
+    logical, parameter :: accelerator_enabled = .true.
+#else
+    logical, parameter :: accelerator_enabled = .false.
+#endif
+
+    logical :: do_mdot_extraction = .false.      ! Extracción de tasa de acreción
+    logical :: do_gw_extraction = .false.        ! Extracción de ondas gravitacionales
+    logical :: do_ppi_diagnostics = .false.      ! Modos azimutales y estado global
+
+    ! Diagnóstico opcional CPU. Contadores conservados por checkpoints V9, incluidos
+    ! los tres subpasos RK y las caras de frontera; desactivado por defecto.
+    logical :: do_numerical_diagnostics = .false.
+    integer, parameter :: NUM_RECON_GODUNOV=1, NUM_RECON_TVD=2, NUM_RECON_WENO3=3
+    integer, parameter :: NUM_RECON_MP5=4, NUM_RECON_WENO5=5
+    integer, parameter :: NUM_FACE_RHO_FLOOR=6, NUM_FACE_P_FLOOR=7
+    integer, parameter :: NUM_C2P_CALLS=8, NUM_C2P_LOW_D=9, NUM_C2P_MOMENTUM=10
+    integer, parameter :: NUM_C2P_ROOT_FAIL=11, NUM_C2P_BAD_V=12, NUM_C2P_SANITIZE=13
+    integer, parameter :: NUM_P2C_VELOCITY_CAP=14, NUM_HLLC_CALLS=15, NUM_HLLC_FALLBACK=16
+    integer, parameter :: NUM_EVENT_COUNT=16
+    integer(int64) :: numerical_events(NUM_EVENT_COUNT)=0_int64
+    real*8 :: numerical_delta_u(neq)=0.0d0
+
+    ! Control reproducible de perturbaciones para toros de Font--Daigne.
+    integer, parameter :: PERT_NONE = 0
+    integer, parameter :: PERT_PRESSURE_NOISE = 1
+    integer, parameter :: PERT_DENSITY_NOISE = 2
+    integer, parameter :: PERT_DENSITY_MODE = 3
+    integer, parameter :: PPI_MAX_MODE = 4
+
+    logical :: apply_perturbation = .false.
+    logical :: perturbation_applied = .false.
+    integer :: perturbation_type = PERT_PRESSURE_NOISE
+    integer :: perturbation_seed = 3435
+    integer :: diagnostic_stride = 100
+    integer :: extraction_stride = 10
+    integer :: mass_monitor_stride = 1000
+    real*8 :: perturbation_time = 1000.0d0
+    real*8 :: perturbation_amplitude = 0.01d0
+    real*8 :: perturbation_mode = 1.0d0
+
+    ! ==========================================================
+    ! LÍMITES NUMÉRICOS (Atmósferas y Tolerancias)
+    ! ==========================================================
+    real*8, parameter :: tol_v = 1.0d-5
+    real*8, parameter :: v_max = 1.0d0 - tol_v
+
+    real*8 :: rho_floor = 1.0d-10, p_floor = 1.0d-13
+    real*8 :: D_floor = 1.0d-10, tau_floor = 3.0d-13
+
+    ! ==========================================================
+    ! PARÁMETROS DE LAS CONDICIONES INICIALES
+    ! ==========================================================
+    ! Tubos de choque.
+    real*8 :: sod_interface = 0.5d0
+    real*8 :: sod_rho_left = 1.0d0, sod_rho_right = 0.125d0
+    real*8 :: sod_pressure_left = 1.0d0, sod_pressure_right = 0.1d0
+
+    real*8 :: strong_interface = 0.5d0
+    real*8 :: strong_rho_left = 1.0d0, strong_rho_right = 1.0d0
+    real*8 :: strong_pressure_left = 1000.0d0, strong_pressure_right = 0.01d0
+
+    real*8 :: shu_interface = 0.5d0
+    real*8 :: shu_rho_left = 5.0d0, shu_pressure_left = 50.0d0
+    real*8 :: shu_rho_right = 2.0d0, shu_rho_amplitude = 0.3d0
+    real*8 :: shu_wave_number = 50.0d0, shu_pressure_right = 5.0d0
+
+    ! Kelvin--Helmholtz.
+    real*8 :: khi_half_width = 0.25d0
+    real*8 :: khi_rho_inner = 2.0d0, khi_rho_outer = 1.0d0
+    real*8 :: khi_vx_inner = 0.5d0, khi_vx_outer = -0.5d0
+    real*8 :: khi_pressure = 2.5d0
+    real*8 :: khi_perturbation_amplitude = 0.01d0
+    real*8 :: khi_perturbation_wave_number = 10.0d0
+    real*8 :: khi_perturbation_width = 0.05d0
+
+    ! Jet axisimétrico.
+    real*8 :: jet_ambient_density = 10.0d0
+    real*8 :: jet_ambient_pressure = 0.01d0
+    real*8 :: jet_ambient_velocity = 0.0d0
+    real*8 :: jet_nozzle_radius = 1.0d0, jet_nozzle_length = 1.0d0
+    real*8 :: jet_density = 0.1d0, jet_pressure = 0.01d0
+    real*8 :: jet_velocity = 0.99d0
+
+    ! Onda suave para convergencia. wave_number está en múltiplos de pi.
+    real*8 :: advected_wave_density = 1.0d0
+    real*8 :: advected_wave_amplitude = 0.1d0
+    real*8 :: advected_wave_speed = 0.5d0
+    real*8 :: advected_wave_pressure = 1.0d0
+    real*8 :: advected_wave_number = 2.0d0
+
+    ! Acreción y explosión fuera del eje.
+    real*8 :: michel_critical_radius = 100.0d0
+    real*8 :: michel_critical_density = 0.1d0
+    real*8 :: dust_accretion_constant = -0.5d0
+    real*8 :: offaxis_radial_center = 15.0d0
+    real*8 :: offaxis_phi_center = acos(-1.0d0)
+    real*8 :: offaxis_width = 1.5d0
+    real*8 :: offaxis_background_density = 0.1d0
+    real*8 :: offaxis_background_pressure = 0.1d0
+    real*8 :: offaxis_density_amplitude = 1.0d0
+    real*8 :: offaxis_pressure_amplitude = 1.0d0
+
+    ! Font--Daigne (ell=-u_phi/u_t constante): radios en unidades de M.
+    real*8 :: fd_inner_radius = 6.25d0
+    real*8 :: fd_pressure_max_radius = 9.25d0
+    real*8 :: fd_polytropic_constant = 0.0015d0
+
+    ! Fishbone--Moncrief (L=u_phi*u^t constante), independiente del FD.
+    real*8 :: fm_inner_radius = 8.0d0
+    real*8 :: fm_pressure_max_radius = 12.0d0
+    real*8 :: fm_polytropic_constant = 0.0015d0
+
+    ! ==========================================================
+    ! ARQUITECTURA NUMÉRICA (Reconstrucción)
+    ! ==========================================================
+    integer, parameter :: REC_GODUNOV = 1
+    integer, parameter :: REC_TVD     = 2
+    integer, parameter :: REC_WENO3   = 3
+    integer, parameter :: REC_MP5     = 4
+    integer, parameter :: REC_WENO5   = 5
+
+    integer, parameter :: RS_HLLE = 1
+    integer, parameter :: RS_HLLC = 2
+    integer, parameter :: RS_HLLD = 3
+    integer :: riemann_solver_id = RS_HLLE
+
+    integer, parameter :: LIM_MINMOD   = 1
+    integer, parameter :: LIM_SUPERBEE = 2
+    integer, parameter :: LIM_MC       = 3
+
+    integer :: rec_method_id = REC_WENO5
+    integer :: tvd_limiter_id = LIM_MC
+    character(len=20) :: scheme_name
+    character(len=10) :: solver_name
+    integer :: nghost
+
+    ! ==========================================================
+    ! ENTRADA/SALIDA (I/O) Y CHECKPOINTS
+    ! ==========================================================
+    integer :: case_id
+    character(len=50) :: case_name
+    character(len=256) :: output_folder
+    character(len=50) :: output_prefix
+
+    ! El estado siempre se calcula en las coordenadas de la metrica. Esta
+    ! opcion solo controla la geometria cartesiana escrita en los VTK.
+    integer, parameter :: VTK_MAP_PHYSICAL = 1
+    integer, parameter :: VTK_MAP_UNTWISTED = 2
+    integer :: vtk_mapping_id = VTK_MAP_PHYSICAL
+
+    real*8 :: save_interval
+    real*8 :: next_save_time
+
+    real*8, allocatable :: michel_injector(:,:,:,:) ! [ghost radial, y, z, variable]
+
+    real*8 :: checkpoint_interval = 100.0d0
+    ! Wall-clock seconds per process, independent of physical integration_time.
+    ! Zero disables each wall-clock feature. Margin must cover RK + checkpoint + cleanup.
+    real*8 :: walltime_limit_seconds = 0.0d0
+    real*8 :: walltime_margin_seconds = 900.0d0
+    real*8 :: walltime_checkpoint_seconds = 0.0d0
+    real*8 :: next_checkpoint
+    logical :: do_restart = .false.
+    character(len=1024) :: restart_file = 'FontDaigne_Equatorial_test/checkpoint_weno5_hlle_08800.rst'
+
+    ! Símbolos de módulo visibles desde rutinas `!$acc routine`. La memoria
+    ! real se crea y puebla después de conocer la malla, en accelerator.f90.
+    !$acc declare create(nx,ny,nz,nghost,dx,dy,dz,adb_idx,g1,rho_floor,p_floor)
+    !$acc declare create(rec_method_id,tvd_limiter_id,riemann_solver_id,use_shock_sensor)
+    !$acc declare create(use_srhd_wavespeeds,flat_cartesian_sources,curved_metric)
+    !$acc declare create(cylindrical_geometry,polar_geometry,case_id)
+    !$acc declare create(jet_ambient_density,jet_ambient_pressure,jet_ambient_velocity)
+    !$acc declare create(jet_nozzle_radius,jet_density,jet_pressure,jet_velocity)
+    !$acc declare create(x,y,z,x_face,y_face,z_face,u,up,p,rhs,michel_injector)
+    !$acc declare create(alpha_c,beta_c,gamma_c,gamma_inv_c,gmunu_c,sqrt_gamma_c)
+    !$acc declare create(chris_c,dg_c,dlna_c)
+    !$acc declare create(alpha_f_x,beta_f_x,gamma_f_x,sqrt_gamma_f_x)
+    !$acc declare create(alpha_f_y,beta_f_y,gamma_f_y,sqrt_gamma_f_y)
+    !$acc declare create(alpha_f_z,beta_f_z,gamma_f_z,sqrt_gamma_f_z)
+
+contains
+
+    subroutine count_numerical_event(event, amount)
+        integer, intent(in) :: event
+        integer(int64), intent(in), optional :: amount
+        integer(int64) :: increment
+        if (.not. do_numerical_diagnostics) return
+        increment=1_int64
+        if (present(amount)) increment=amount
+        !$omp atomic update
+        numerical_events(event)=numerical_events(event)+increment
+    end subroutine count_numerical_event
+
+    subroutine record_numerical_change(before, after)
+        real*8, intent(in) :: before(:), after(:)
+        integer :: component
+        if (.not. do_numerical_diagnostics) return
+        if (all(before == after)) return
+        do component=1,neq
+            !$omp atomic update
+            numerical_delta_u(component)=numerical_delta_u(component)+(after(component)-before(component))
+        end do
+    end subroutine record_numerical_change
+
+  pure logical function is_polar_geometry(geometry_name)
+    character(len=*), intent(in) :: geometry_name
+
+    is_polar_geometry = trim(geometry_name) == 'Spherical' .or. &
+                        trim(geometry_name) == 'Spheroidal'
+  end function is_polar_geometry
+
+end module variables

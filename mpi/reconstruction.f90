@@ -1,0 +1,807 @@
+! =======================================================================================
+! Módulo: reconstruction (Reconstrucción Espacial y Limitadores de Flujo)
+! ---------------------------------------------------------------------------------------
+! Propósito: Interpolar las variables primitivas desde los centros de las celdas (i)
+! hacia las interfaces (i+1/2). Estos estados interpolados (q_L y q_R) son el "input"
+! que el Solucionador de Riemann necesita para resolver el problema de discontinuidad
+! local y calcular los flujos.
+!
+! Física/Matemática: Implementa esquemas TVD (Total Variation Diminishing) y
+! métodos de alto orden (WENO, MP5) para garantizar precisión espectral en zonas
+! suaves del fluido (turbulencia) y evitar oscilaciones térmicas no físicas
+! cerca de choques fuertes (Fenómeno de Gibbs).
+! =======================================================================================
+module reconstruction
+  use variables
+  implicit none
+  private
+  public :: reconstruct_1d_core, reconstruct_face_state
+
+contains
+
+  ! ===================================================================================
+  ! LIMITADORES DE PENDIENTE (Slope Limiters)
+  ! ===================================================================================
+  ! Conjunto de funciones matemáticas para limitar los gradientes espaciales y
+  ! forzar la monotonicidad estricta en las interfaces.
+
+  real*8 function minmod_2(a, b)
+    !$acc routine seq
+    implicit none
+    real*8, intent(in) :: a, b
+    minmod_2 = 0.5d0 * (sign(1.0d0, a) + sign(1.0d0, b)) * min(abs(a), abs(b))
+  end function minmod_2
+
+  real*8 function minmod_3(a, b, c)
+    !$acc routine seq
+    implicit none
+    real*8, intent(in) :: a, b, c
+    minmod_3 = sign(1.0d0, a) * max(0.0d0, min(abs(a), sign(1.0d0, a)*b, sign(1.0d0, a)*c))
+  end function minmod_3
+
+  real*8 function minmod_4(a, b, c, d)
+    !$acc routine seq
+    implicit none
+    real*8, intent(in) :: a, b, c, d
+    minmod_4 = 0.125d0 * (sign(1.0d0, a) + sign(1.0d0, b)) * abs(sign(1.0d0, a) + sign(1.0d0, c)) &
+             * abs(sign(1.0d0, a) + sign(1.0d0, d)) * min(abs(a), abs(b), abs(c), abs(d))
+  end function minmod_4
+
+
+  ! ===================================================================================
+  ! ESQUEMAS DE INTERPOLACIÓN DE ALTO ORDEN
+  ! ===================================================================================
+
+  ! Subrutina: weno3_interface (WENO3 con Epsilon Dinámico de Castro 2011)
+  ! Combina 2 esténciles lineales para lograr 3er orden en zonas suaves.
+  ! Utiliza un epsilon dinámico escalado con el tamaño de malla (dx) para
+  ! garantizar la convergencia teórica en puntos críticos.
+
+  ! original
+  ! function weno3_interface(q) result(weno_val)
+  !   implicit none
+  !   real*8, intent(in) :: q(-1:1)
+  !   real*8 :: weno_val
+  !   real*8 :: p0, p1
+  !   real*8 :: beta_0, beta_1, tau_3
+  !   real*8 :: alpha_0, alpha_1, weight_0, weight_1
+
+  !   ! Parámetros constantes
+  !   real*8, parameter :: eps_z = 1.0d-12
+  !   real*8, parameter :: d0 = 2.0d0/3.0d0, d1 = 1.0d0/3.0d0
+
+  !   ! 1. Polinomios candidatos de los sub-esténciles
+  !   p0 =  0.5d0*q(0) + 0.5d0*q(1)
+  !   p1 = -0.5d0*q(-1) + 1.5d0*q(0)
+
+  !   ! 2. Indicadores de suavidad local (Jiang-Shu)
+  !   beta_0 = (q(0) - q(1))**2
+  !   beta_1 = (q(-1) - q(0))**2
+
+  !   ! 3. Indicador de suavidad global (Magia de WENO-Z)
+  !   tau_3 = abs(beta_0 - beta_1)
+
+  !   ! 4. Pesos no lineales penalizados (WENO-Z)
+  !   alpha_0 = d0 * (1.0d0 + (tau_3 / (beta_0 + eps_z)))
+  !   alpha_1 = d1 * (1.0d0 + (tau_3 / (beta_1 + eps_z)))
+
+  !   ! 5. Normalización estándar
+  !   weight_0 = alpha_0 / (alpha_0 + alpha_1)
+  !   weight_1 = alpha_1 / (alpha_0 + alpha_1)
+
+  !   ! 6. Ensamblaje final
+  !   weno_val = weight_0 * p0 + weight_1 * p1
+  ! end function weno3_interface
+
+  ! weno-m
+  ! function weno3_interface(q) result(weno_val)
+  !   implicit none
+  !   real*8, intent(in) :: q(-1:1)
+  !   real*8 :: weno_val
+  !   real*8 :: p0, p1
+  !   real*8 :: beta_0, beta_1
+  !   real*8 :: alpha_0, alpha_1, w0_js, w1_js
+  !   real*8 :: w0_map, w1_map, sum_map
+
+  !   real*8, parameter :: eps = 1.0d-12
+  !   real*8, parameter :: d0 = 2.0d0/3.0d0, d1 = 1.0d0/3.0d0
+
+  !   ! 1. Polinomios candidatos
+  !   p0 =  0.5d0*q(0) + 0.5d0*q(1)
+  !   p1 = -0.5d0*q(-1) + 1.5d0*q(0)
+
+  !   ! 2. Betas (WENO-JS)
+  !   beta_0 = (q(0) - q(1))**2
+  !   beta_1 = (q(-1) - q(0))**2
+
+  !   ! 3. Pesos Clásicos Jiang-Shu
+  !   alpha_0 = d0 / (beta_0 + eps)**2
+  !   alpha_1 = d1 / (beta_1 + eps)**2
+  !   w0_js = alpha_0 / (alpha_0 + alpha_1)
+  !   w1_js = alpha_1 / (alpha_0 + alpha_1)
+
+  !   ! =========================================================
+  !   ! 4. LA MAGIA DE WENO-M (Mapped WENO)
+  !   ! Esta función amplifica los pesos hacia d_k en zonas suaves
+  !   ! g(w, d) = w * (d + d^2 - 3*d*w + w^2) / (d^2 + w*(1 - 2*d))
+  !   ! =========================================================
+  !   w0_map = w0_js * (d0 + d0**2 - 3.0d0*d0*w0_js + w0_js**2) / &
+  !           (d0**2 + w0_js*(1.0d0 - 2.0d0*d0) + eps)
+
+  !   w1_map = w1_js * (d1 + d1**2 - 3.0d0*d1*w1_js + w1_js**2) / &
+  !           (d1**2 + w1_js*(1.0d0 - 2.0d0*d1) + eps)
+
+  !   ! 5. Normalización final
+  !   sum_map = w0_map + w1_map
+  !   w0_map = w0_map / sum_map
+  !   w1_map = w1_map / sum_map
+
+  !   ! 6. Ensamblaje
+  !   weno_val = w0_map * p0 + w1_map * p1
+  ! end function weno3_interface
+
+  ! weno-dinamico
+  function weno3_interface(q) result(weno_val)
+    !$acc routine seq
+    implicit none
+    real*8, intent(in) :: q(-1:)
+    real*8 :: weno_val
+    real*8 :: p0, p1
+    real*8 :: beta_0, beta_1
+    real*8 :: alpha_0, alpha_1, weight_0, weight_1
+
+    ! --- Variables para tu Epsilon Híbrido ---
+    real*8 :: shock_sensor, eps_hybrid
+    real*8, parameter :: eps_min = 1.0d-14
+    real*8, parameter :: d0 = 2.0d0/3.0d0, d1 = 1.0d0/3.0d0
+
+    ! 1. Polinomios candidatos
+    p0 =  0.5d0*q(0) + 0.5d0*q(1)
+    p1 = -0.5d0*q(-1) + 1.5d0*q(0)
+
+    ! 2. Indicadores de suavidad local
+    beta_0 = (q(0) - q(1))**2
+    beta_1 = (q(-1) - q(0))**2
+
+    ! =========================================================
+    ! 3. EL EPSILON ADAPTATIVO
+    ! =========================================================
+    ! Sensor adimensional: 0 (Suave) ---> 1 (Choque fuerte)
+    shock_sensor = abs(beta_0 - beta_1) / (max(beta_0, beta_1) + eps_min)
+
+    ! Válvula exponencial: Si es suave da dx, si es choque da eps_min
+    eps_hybrid = eps_min + (q(-1)**2 + q(0)**2 + q(1)**2) * exp(-10.0d0 * shock_sensor)
+
+    ! 4. Pesos Clásicos pero con el Epsilon Dinámico Inteligente
+    alpha_0 = d0 / (eps_hybrid + beta_0)**2
+    alpha_1 = d1 / (eps_hybrid + beta_1)**2
+
+    ! 5. Normalización
+    weight_0 = alpha_0 / (alpha_0 + alpha_1)
+    weight_1 = alpha_1 / (alpha_0 + alpha_1)
+
+    ! 6. Ensamblaje
+    weno_val = weight_0 * p0 + weight_1 * p1
+  end function weno3_interface
+
+  ! Subrutina: weno5_interface (WENO5-Z)
+  ! Esquema de 5to orden mejorado. Utiliza el indicador de suavidad global (tau5)
+  ! para evitar la degradación del orden cerca de extremos suaves, superando
+  ! al WENO5 clásico de Jiang-Shu.
+  function weno5_interface(q) result(weno_val)
+    !$acc routine seq
+    implicit none
+    real*8, intent(in) :: q(-2:)
+    real*8 :: weno_val
+    real*8 :: b0, b1, b2, tau5, a0, a1, a2, w0, w1, w2
+    real*8 :: p0, p1, p2
+    real*8, parameter :: eps = 1.0d-14
+    real*8, parameter :: d0 = 0.3d0, d1 = 0.6d0, d2 = 0.1d0
+
+    b0 = 13.0d0/12.0d0*(q(0) - 2.0d0*q(1) + q(2))**2 + 0.25d0*(3.0d0*q(0) - 4.0d0*q(1) + q(2))**2
+    b1 = 13.0d0/12.0d0*(q(-1) - 2.0d0*q(0) + q(1))**2 + 0.25d0*(q(-1) - q(1))**2
+    b2 = 13.0d0/12.0d0*(q(-2) - 2.0d0*q(-1) + q(0))**2 + 0.25d0*(q(-2) - 4.0d0*q(-1) + 3.0d0*q(0))**2
+
+    tau5 = abs(b0 - b2)
+
+    a0 = d0 * (1.0d0 + (tau5 / (eps + b0)))
+    a1 = d1 * (1.0d0 + (tau5 / (eps + b1)))
+    a2 = d2 * (1.0d0 + (tau5 / (eps + b2)))
+
+    w0 = a0 / (a0 + a1 + a2)
+    w1 = a1 / (a0 + a1 + a2)
+    w2 = a2 / (a0 + a1 + a2)
+
+    p0 = (1.0d0/3.0d0)*q(0)  + (5.0d0/6.0d0)*q(1) - (1.0d0/6.0d0)*q(2)
+    p1 = -(1.0d0/6.0d0)*q(-1) + (5.0d0/6.0d0)*q(0) + (1.0d0/3.0d0)*q(1)
+    p2 = (1.0d0/3.0d0)*q(-2) - (7.0d0/6.0d0)*q(-1) + (11.0d0/6.0d0)*q(0)
+
+    weno_val = w0*p0 + w1*p1 + w2*p2
+  end function weno5_interface
+
+
+  ! Subrutina: mp5_interface
+  ! Monotonicity Preserving de 5to Orden. Basado en polinomios que no cruzan
+  ! límites geométricos locales. Extraordinariamente nítido en choques, aunque
+  ! puede generar ligeras inestabilidades en la relatividad acoplada.
+  function mp5_interface(q) result(mp5_val)
+    !$acc routine seq
+    implicit none
+    real*8, intent(in) :: q(-2:)
+    real*8 :: mp5_val, val_L, val_mp, d_jm1, d_j, d_jp1, dm4_jph, dm4_jmh
+    real*8 :: val_ul, val_av, val_md, val_lc, val_min, val_max
+    real*8, parameter :: alpha_mp5 = 4.0d0
+    real*8, parameter :: eps = 1.0d-10
+
+    val_L = (2.0d0*q(-2) - 13.0d0*q(-1) + 47.0d0*q(0) + 27.0d0*q(1) - 3.0d0*q(2)) / 60.0d0
+
+    val_mp = q(0) + minmod_2(q(1)-q(0), alpha_mp5*(q(0)-q(-1)))
+
+    if ((val_L - q(0))*(val_L - val_mp) < eps) then
+      mp5_val = val_L
+    else
+      d_jm1 = q(-2) - 2.0d0*q(-1) + q(0)
+      d_j   = q(-1) - 2.0d0*q(0) + q(1)
+      d_jp1 = q(0) - 2.0d0*q(1) + q(2)
+
+      dm4_jph = minmod_4(4.0d0*d_j - d_jp1, 4.0d0*d_jp1 - d_j, d_j, d_jp1)
+      dm4_jmh = minmod_4(4.0d0*d_j - d_jm1, 4.0d0*d_jm1 - d_j, d_j, d_jm1)
+
+      val_ul = q(0) + alpha_mp5*(q(0) - q(-1))
+      val_av = 0.5d0*(q(0) + q(1))
+      val_md = val_av - 0.5d0*dm4_jph
+      val_lc = q(0) + 0.5d0*(q(0) - q(-1)) + 4.0d0*dm4_jmh/3.0d0
+
+      val_min = max(min(q(0), q(1), val_md), min(q(0), val_ul, val_lc))
+      val_max = min(max(q(0), q(1), val_md), max(q(0), val_ul, val_lc))
+
+      mp5_val = val_L + minmod_2(val_min - val_L, val_max - val_L)
+    end if
+  end function mp5_interface
+
+
+  ! Función: tvd_slope
+  ! Selector dinámico (numérico) de limitadores de segundo orden.
+  function tvd_slope(a, b, limiter_id) result(slope)
+    !$acc routine seq
+    real*8, intent(in) :: a, b
+    integer, intent(in) :: limiter_id
+    real*8 :: slope
+
+    select case(limiter_id)
+    case(LIM_MINMOD)
+      slope = minmod_2(a, b)
+    case(LIM_SUPERBEE)
+      if (a*b <= 0.0d0) then
+        slope = 0.0d0
+      else
+        slope = sign(1.0d0, a) * max(min(2.0d0*abs(a), abs(b)), min(abs(a), 2.0d0*abs(b)))
+      end if
+    case(LIM_MC)
+      slope = minmod_3(2.0d0*b, 0.5d0*(a+b), 2.0d0*a)
+    case default
+      slope = minmod_2(a, b)
+    end select
+  end function tvd_slope
+
+
+  ! Reconstrucción de una sola cara para el backend OpenACC. El esténcil
+  ! contiene las seis celdas i-2,...,i+3 alrededor de la cara i+1/2.
+  ! Esta variante no crea tiras por hilo y conserva exactamente la jerarquía
+  ! Godunov -> TVD -> WENO3 -> MP5/WENO5 del camino CPU.
+  subroutine reconstruct_face_state(stencil, face_index, nodes, sweep_dir, method_id, &
+                                    limiter_id, shock_sensor_enabled, metric_is_curved, &
+                                    rho_floor_local, p_floor_local, q_left, q_right, sensor_limits)
+    !$acc routine seq
+    implicit none
+    real*8, intent(in) :: stencil(neq,-2:3)
+    integer, intent(in) :: face_index, nodes, sweep_dir, method_id, limiter_id
+    logical, intent(in) :: shock_sensor_enabled, metric_is_curved
+    real*8, intent(in) :: rho_floor_local, p_floor_local
+    real*8, intent(in) :: sensor_limits(7)
+    real*8, intent(out) :: q_left(neq), q_right(neq)
+
+    integer :: component
+    real*8 :: p_jump, p_min, p_max, rho_jump, rho_min, rho_max
+    real*8 :: slope_left_a, slope_left_b, slope_right_a, slope_right_b
+    logical :: force_godunov, force_tvd, force_weno3
+    real*8 :: atm_factor,p_tol_tvd,rho_tol_tvd,p_tol_weno,rho_tol_weno,p_tol_godunov,rho_tol_godunov
+
+    p_tol_weno=sensor_limits(1); rho_tol_weno=sensor_limits(2)
+    p_tol_tvd=sensor_limits(3); rho_tol_tvd=sensor_limits(4)
+    p_tol_godunov=sensor_limits(5); rho_tol_godunov=sensor_limits(6)
+    atm_factor=sensor_limits(7)
+
+    ! face_index/nodes describe the global grid; stencil indices remain local.
+    ! Face-centered union of the left/right five-cell reconstruction stencils.
+    ! A single fallback decision must be invariant under swapping both sides.
+    p_max = maxval(stencil(eq_pr,-2:3))
+    p_min = minval(stencil(eq_pr,-2:3))
+    rho_max = maxval(stencil(eq_de,-2:3))
+    rho_min = minval(stencil(eq_de,-2:3))
+
+    if (p_max > 1.0d3*p_floor_local) then
+      p_jump = (p_max-p_min)/max(p_min,p_floor_local)
+    else
+      p_jump = 0.0d0
+    end if
+    if (rho_max > 1.0d3*rho_floor_local) then
+      rho_jump = (rho_max-rho_min)/max(rho_min,rho_floor_local)
+    else
+      rho_jump = 0.0d0
+    end if
+
+    force_godunov = metric_is_curved .and. sweep_dir == DIR_X .and. face_index <= 0 .and. &
+                     (method_id >= REC_WENO3 .or. shock_sensor_enabled)
+    if (shock_sensor_enabled) then
+      force_godunov = force_godunov .or. stencil(eq_de,0) <= atm_factor*rho_floor_local .or. &
+                       stencil(eq_de,1) <= atm_factor*rho_floor_local .or. &
+                       p_jump >= p_tol_godunov .or. rho_jump >= rho_tol_godunov
+    end if
+    force_tvd = shock_sensor_enabled .and. &
+                (p_jump >= p_tol_tvd .or. rho_jump >= rho_tol_tvd)
+    force_weno3 = shock_sensor_enabled .and. &
+                  (p_jump >= p_tol_weno .or. rho_jump >= rho_tol_weno)
+
+    if (method_id == REC_MP5 .and. metric_is_curved .and. shock_sensor_enabled) then
+      force_weno3 = force_weno3 .or. &
+                    (sweep_dir == DIR_X .and. face_index <= 3) .or. &
+                    (sweep_dir == DIR_Y .and. (face_index <= 2 .or. face_index >= nodes-2))
+    end if
+
+    do component = 1, neq
+      if (method_id == REC_GODUNOV .or. force_godunov) then
+        q_left(component) = stencil(component,0)
+        q_right(component) = stencil(component,1)
+      else if (method_id == REC_TVD .or. force_tvd) then
+        slope_left_a = stencil(component,0)-stencil(component,-1)
+        slope_left_b = stencil(component,1)-stencil(component,0)
+        slope_right_a = stencil(component,1)-stencil(component,0)
+        slope_right_b = stencil(component,2)-stencil(component,1)
+        q_left(component) = stencil(component,0) + &
+                            0.5d0*tvd_slope(slope_left_a,slope_left_b, &
+                            merge(limiter_id,LIM_MC,method_id == REC_TVD))
+        q_right(component) = stencil(component,1) - &
+                             0.5d0*tvd_slope(slope_right_a,slope_right_b, &
+                             merge(limiter_id,LIM_MC,method_id == REC_TVD))
+      else if (method_id == REC_WENO3 .or. force_weno3) then
+        q_left(component) = weno3_interface(stencil(component,-1:1))
+        q_right(component) = weno3_interface(stencil(component,2:0:-1))
+      else if (method_id == REC_MP5) then
+        q_left(component) = mp5_interface(stencil(component,-2:2))
+        q_right(component) = mp5_interface(stencil(component,3:-1:-1))
+      else
+        q_left(component) = weno5_interface(stencil(component,-2:2))
+        q_right(component) = weno5_interface(stencil(component,3:-1:-1))
+      end if
+    end do
+
+    q_left(eq_de) = max(q_left(eq_de),rho_floor_local)
+    q_right(eq_de) = max(q_right(eq_de),rho_floor_local)
+    q_left(eq_pr) = max(q_left(eq_pr),p_floor_local)
+    q_right(eq_pr) = max(q_right(eq_pr),p_floor_local)
+  end subroutine reconstruct_face_state
+
+
+  ! ===================================================================================
+  ! NÚCLEO PRINCIPAL DE RECONSTRUCCIÓN (Arquitectura Híbrida Vectorizada)
+  ! ===================================================================================
+
+  subroutine reconstruct_1d_core(prim_1d, nodes, q_L, q_R, sweep_dir, face_offset, global_nodes)
+    implicit none
+    real*8, intent(in)  :: prim_1d(neq, -nghost:nodes+nghost)
+    integer, intent(in) :: nodes, sweep_dir
+    integer, intent(in), optional :: face_offset,global_nodes
+    real*8, intent(out) :: q_L(neq, 0:nodes), q_R(neq, 0:nodes)
+    integer :: i, k, first_face,total_nodes
+    real*8  :: s_min_L, s_max_L, s_min_R, s_max_R
+    real*8  :: p_jump, p_min, p_max
+    real*8  :: rho_jump, rho_min, rho_max
+    real*8 :: atm_factor,p_tol_tvd,rho_tol_tvd,p_tol_weno,rho_tol_weno,p_tol_godunov,rho_tol_godunov
+
+    first_face=0
+    total_nodes=nodes
+    if (present(face_offset)) first_face=face_offset
+    if (present(global_nodes)) total_nodes=global_nodes
+    if (nodes<1.or.first_face<0.or.total_nodes<nodes) error stop 'invalid reconstruction domain metadata'
+    if (first_face>total_nodes-nodes) error stop 'reconstruction block exceeds global domain'
+
+    ! Parámetros compartidos con la variante por caras; no editar fuente
+    ! para comparar sensores. Los valores predeterminados siguen siendo A.
+    p_tol_weno=shock_sensor_thresholds(1); rho_tol_weno=shock_sensor_thresholds(2)
+    p_tol_tvd=shock_sensor_thresholds(3); rho_tol_tvd=shock_sensor_thresholds(4)
+    p_tol_godunov=shock_sensor_thresholds(5); rho_tol_godunov=shock_sensor_thresholds(6)
+    atm_factor=shock_sensor_thresholds(7)
+
+    select case(rec_method_id)
+
+    case(REC_GODUNOV)
+
+    !$OMP PARALLEL DO PRIVATE(i)
+      do i = 0, nodes
+        q_L(:, i) = prim_1d(:, i)
+        q_R(:, i) = prim_1d(:, i+1)
+      end do
+    !$OMP END PARALLEL DO
+
+    case(REC_TVD)
+
+    if (use_shock_sensor) then
+      !$OMP PARALLEL DO PRIVATE(k, i, s_min_L, s_max_L, s_min_R, s_max_R, p_max, p_min, p_jump, rho_max, rho_min, rho_jump)
+        do i = 0, nodes
+          p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
+          p_min = min(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
+          rho_max = max(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
+          rho_min = min(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
+
+          if (p_max > 1.0d3 * p_floor) then
+            p_jump = (p_max - p_min) / max(p_min, p_floor)
+          else
+            p_jump = 0.0d0
+          end if
+
+          if (rho_max > 1.0d3 * rho_floor) then
+            rho_jump = (rho_max - rho_min) / max(rho_min, rho_floor)
+          else
+            rho_jump = 0.0d0
+          end if
+
+          do k = 1, neq
+            if (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_X .and. i+first_face <= 0) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+            else if (prim_1d(eq_de, i) <= atm_factor * rho_floor .or. prim_1d(eq_de, i+1) <= atm_factor * rho_floor) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+            else if (p_jump >= p_tol_godunov .or. rho_jump >= rho_tol_godunov) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+            else
+              s_min_L = prim_1d(k, i) - prim_1d(k, i-1)
+              s_max_L = prim_1d(k, i+1) - prim_1d(k, i)
+              q_L(k, i) = prim_1d(k, i) + 0.5d0 * tvd_slope(s_min_L, s_max_L, tvd_limiter_id)
+
+              s_min_R = prim_1d(k, i+1) - prim_1d(k, i)
+              s_max_R = prim_1d(k, i+2) - prim_1d(k, i+1)
+              q_R(k, i) = prim_1d(k, i+1) - 0.5d0 * tvd_slope(s_min_R, s_max_R, tvd_limiter_id)
+            end if
+          end do
+        end do
+      !$OMP END PARALLEL DO
+    else
+      !$OMP PARALLEL DO PRIVATE(k,i,s_min_L,s_max_L,s_min_R,s_max_R)
+        do k = 1, neq
+          do i = 0, nodes
+            s_min_L = prim_1d(k, i) - prim_1d(k, i-1)
+            s_max_L = prim_1d(k, i+1) - prim_1d(k, i)
+            q_L(k, i) = prim_1d(k, i) + 0.5d0 * tvd_slope(s_min_L, s_max_L, tvd_limiter_id)
+
+            s_min_R = prim_1d(k, i+1) - prim_1d(k, i)
+            s_max_R = prim_1d(k, i+2) - prim_1d(k, i+1)
+            q_R(k, i) = prim_1d(k, i+1) - 0.5d0 * tvd_slope(s_min_R, s_max_R, tvd_limiter_id)
+          end do
+        end do
+      !$OMP END PARALLEL DO
+    end if
+
+
+    case(REC_WENO3)
+
+    if (use_shock_sensor) then
+      !$OMP PARALLEL DO PRIVATE(k, i, s_min_L, s_max_L, s_min_R, s_max_R, p_max, p_min, p_jump, rho_max, rho_min, rho_jump)
+        do i = 0, nodes
+
+          p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
+          p_min = min(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
+          rho_max = max(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
+          rho_min = min(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
+
+          if (p_max > 1.0d3 * p_floor) then
+            p_jump = (p_max - p_min) / max(p_min, p_floor)
+          else
+            p_jump = 0.0d0
+          end if
+
+          if (rho_max > 1.0d3 * rho_floor) then
+            rho_jump = (rho_max - rho_min) / max(rho_min, rho_floor)
+          else
+            rho_jump = 0.0d0
+          end if
+
+          do k = 1, neq
+
+            if (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_X .and. i+first_face <= 0) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+
+            else if (prim_1d(eq_de, i) <= atm_factor * rho_floor .or. prim_1d(eq_de, i+1) <= atm_factor * rho_floor) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+
+            else if (p_jump >= p_tol_godunov .or. rho_jump >= rho_tol_godunov) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+
+            else if (p_jump >= p_tol_tvd .or. rho_jump >= rho_tol_tvd) then
+              s_min_L = prim_1d(k, i) - prim_1d(k, i-1)
+              s_max_L = prim_1d(k, i+1) - prim_1d(k, i)
+              q_L(k, i) = prim_1d(k, i) + 0.5d0 * tvd_slope(s_min_L, s_max_L, LIM_MC)
+
+              s_min_R = prim_1d(k, i+1) - prim_1d(k, i)
+              s_max_R = prim_1d(k, i+2) - prim_1d(k, i+1)
+              q_R(k, i) = prim_1d(k, i+1) - 0.5d0 * tvd_slope(s_min_R, s_max_R, LIM_MC)
+
+            else
+              q_L(k, i) = weno3_interface(prim_1d(k, i-1 : i+1))
+              q_R(k, i) = weno3_interface(prim_1d(k, i+2 : i : -1))
+            end if
+
+          end do
+        end do
+      !$OMP END PARALLEL DO
+    else
+      !$OMP PARALLEL DO PRIVATE(k, i)
+        do i = 0, nodes
+          do k = 1, neq
+            ! Fronteras Geométricas Estrictas (Ahora incluye protección polar)
+            if (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_X .and. i+first_face <= 0) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+            else
+              ! MP5 Puro sin paracaídas (Aplica a WENO3 en este caso)
+              q_L(k, i) = weno3_interface(prim_1d(k, i-1 : i+1))
+              q_R(k, i) = weno3_interface(prim_1d(k, i+2 : i : -1))
+            end if
+          end do
+        end do
+      !$OMP END PARALLEL DO
+    end if
+
+
+    case(REC_MP5)
+
+    if (use_shock_sensor) then
+      !$OMP PARALLEL DO PRIVATE(k, i, s_min_L, s_max_L, s_min_R, s_max_R, p_max, p_min, p_jump, rho_max, rho_min, rho_jump)
+        do i = 0, nodes
+
+          p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
+          p_min = min(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
+
+          rho_max = max(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
+          rho_min = min(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
+
+          ! Evaluar el salto solo si hay material real
+          if (p_max > 1.0d3 * p_floor) then
+              p_jump = (p_max - p_min) / max(p_min, p_floor)
+          else
+              p_jump = 0.0d0
+          end if
+
+          if (rho_max > 1.0d3 * rho_floor) then
+              rho_jump = (rho_max - rho_min) / max(rho_min, rho_floor)
+          else
+              rho_jump = 0.0d0
+          end if
+
+          do k = 1, neq
+
+            if (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_X .and. i+first_face <= 0) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+
+            else if (prim_1d(eq_de, i) <= atm_factor * rho_floor .or. prim_1d(eq_de, i+1) <= atm_factor * rho_floor) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+
+            else if (p_jump >= p_tol_godunov .or. rho_jump >= rho_tol_godunov) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+
+            else if (p_jump >= p_tol_tvd .or. rho_jump >= rho_tol_tvd) then
+              s_min_L = prim_1d(k, i) - prim_1d(k, i-1)
+              s_max_L = prim_1d(k, i+1) - prim_1d(k, i)
+              q_L(k, i) = prim_1d(k, i) + 0.5d0 * tvd_slope(s_min_L, s_max_L, LIM_MC)
+
+              s_min_R = prim_1d(k, i+1) - prim_1d(k, i)
+              s_max_R = prim_1d(k, i+2) - prim_1d(k, i+1)
+              q_R(k, i) = prim_1d(k, i+1) - 0.5d0 * tvd_slope(s_min_R, s_max_R, LIM_MC)
+
+            else if (p_jump >= p_tol_weno .or. rho_jump >= rho_tol_weno .or. &
+                    (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_X .and. i+first_face <= 3) .or. &
+                    (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_Y .and. (i+first_face <= 2 .or. i+first_face >= total_nodes - 2))) then
+              q_L(k, i) = weno3_interface(prim_1d(k, i-1 : i+1))
+              q_R(k, i) = weno3_interface(prim_1d(k, i+2 : i : -1))
+
+            else
+              q_L(k, i) = mp5_interface(prim_1d(k, i-2 : i+2))
+              q_R(k, i) = mp5_interface(prim_1d(k, i+3 : i-1 : -1))
+            end if
+
+          end do
+        end do
+      !$OMP END PARALLEL DO
+    else
+      !$OMP PARALLEL DO PRIVATE(k, i)
+        do i = 0, nodes
+          do k = 1, neq
+            ! Fronteras Geométricas Estrictas
+            if (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_X .and. i+first_face <= 0) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+            else
+              ! MP5 Puro sin paracaídas
+              q_L(k, i) = mp5_interface(prim_1d(k, i-2 : i+2))
+              q_R(k, i) = mp5_interface(prim_1d(k, i+3 : i-1 : -1))
+            end if
+          end do
+        end do
+      !$OMP END PARALLEL DO
+    end if
+
+    case(REC_WENO5)
+
+    if (use_shock_sensor) then
+      !$OMP PARALLEL DO PRIVATE(k, i, s_min_L, s_max_L, s_min_R, s_max_R, p_max, p_min, p_jump, rho_max, rho_min, rho_jump)
+        do i = 0, nodes
+
+          p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
+          p_min = min(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
+                      prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
+
+          rho_max = max(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
+          rho_min = min(prim_1d(eq_de, i-2), prim_1d(eq_de, i-1), prim_1d(eq_de, i), &
+                        prim_1d(eq_de, i+1), prim_1d(eq_de, i+2), prim_1d(eq_de, i+3))
+
+          ! Evaluar el salto solo si hay material real
+          if (p_max > 1.0d3 * p_floor) then
+              p_jump = (p_max - p_min) / max(p_min, p_floor)
+          else
+              p_jump = 0.0d0
+          end if
+
+          if (rho_max > 1.0d3 * rho_floor) then
+              rho_jump = (rho_max - rho_min) / max(rho_min, rho_floor)
+          else
+              rho_jump = 0.0d0
+          end if
+
+          do k = 1, neq
+
+            ! 1. Frontera Radial Interna Estricta (DIR_X)
+            if (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_X .and. i+first_face <= 0) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+
+            ! 2. Atmósfera profunda absoluta
+            else if (prim_1d(eq_de, i) <= atm_factor * rho_floor .or. prim_1d(eq_de, i+1) <= atm_factor * rho_floor) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+
+            ! 3. ESCUDO DE ACANTILADO (El antídoto para el ruido en r=6.5)
+            ! Si la diferencia relativa es astronómica, hay una discontinuidad tipo vacío.
+            ! Forzamos Godunov para matar el overshoot (Fenómeno de Gibbs).
+            else if (p_jump >= p_tol_godunov .or. rho_jump >= rho_tol_godunov) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+
+            ! 4. Choques normales -> TVD MC
+            else if (p_jump >= p_tol_tvd .or. rho_jump >= rho_tol_tvd) then
+              s_min_L = prim_1d(k, i) - prim_1d(k, i-1)
+              s_max_L = prim_1d(k, i+1) - prim_1d(k, i)
+              q_L(k, i) = prim_1d(k, i) + 0.5d0 * tvd_slope(s_min_L, s_max_L, LIM_MC)
+
+              s_min_R = prim_1d(k, i+1) - prim_1d(k, i)
+              s_max_R = prim_1d(k, i+2) - prim_1d(k, i+1)
+              q_R(k, i) = prim_1d(k, i+1) - 0.5d0 * tvd_slope(s_min_R, s_max_R, LIM_MC)
+
+            ! 5. Transición suave -> WENO3
+            else if (p_jump >= p_tol_weno .or. rho_jump >= rho_tol_weno) then
+              q_L(k, i) = weno3_interface(prim_1d(k, i-1 : i+1))
+              q_R(k, i) = weno3_interface(prim_1d(k, i+2 : i : -1))
+
+            ! 6. Disco y zonas suaves -> WENO5
+            else
+              q_L(k, i) = weno5_interface(prim_1d(k, i-2 : i+2))
+              q_R(k, i) = weno5_interface(prim_1d(k, i+3 : i-1 : -1))
+            end if
+
+          end do
+
+        end do
+      !$OMP END PARALLEL DO
+    else
+      !$OMP PARALLEL DO PRIVATE(k, i)
+        do i = 0, nodes
+          do k = 1, neq
+            if (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_X .and. i+first_face <= 0) then
+              q_L(k, i) = prim_1d(k, i)
+              q_R(k, i) = prim_1d(k, i+1)
+            else
+              ! WENO5 Puro sin paracaídas
+              q_L(k, i) = weno5_interface(prim_1d(k, i-2 : i+2))
+              q_R(k, i) = weno5_interface(prim_1d(k, i+3 : i-1 : -1))
+            end if
+          end do
+        end do
+      !$OMP END PARALLEL DO
+    end if
+
+    end select
+
+    ! Observa la política aplicada por el backend CPU antes de sus floors.
+    if (do_numerical_diagnostics) call audit_reconstruction_strip(prim_1d,nodes,sweep_dir, &
+      q_L,q_R,p_tol_tvd,rho_tol_tvd,p_tol_weno,rho_tol_weno,p_tol_godunov,rho_tol_godunov,first_face,total_nodes)
+
+    ! Escudo de positividad absoluta
+    !$OMP PARALLEL DO PRIVATE(i)
+    do i = 0, nodes
+      q_L(eq_de, i) = max(q_L(eq_de, i), rho_floor)
+      q_R(eq_de, i) = max(q_R(eq_de, i), rho_floor)
+      q_L(eq_pr, i) = max(q_L(eq_pr, i), p_floor)
+      q_R(eq_pr, i) = max(q_R(eq_pr, i), p_floor)
+    end do
+    !$OMP END PARALLEL DO
+
+  end subroutine reconstruct_1d_core
+
+  subroutine audit_reconstruction_strip(prim,nodes,direction,left,right,pt,rt,pw,rw,pg,rg,face_offset,global_nodes)
+    integer, intent(in) :: nodes,direction,face_offset,global_nodes
+    real*8, intent(in) :: prim(neq,-nghost:nodes+nghost),left(neq,0:nodes),right(neq,0:nodes)
+    real*8, intent(in) :: pt,rt,pw,rw,pg,rg
+    integer :: face,method,event
+    integer(int64) :: counts(7)
+    real*8 :: pmin,pmax,rmin,rmax,jp,jr
+    logical :: radial_edge,near_geometry
+    counts=0_int64
+    do face=0,nodes
+      method=rec_method_id
+      radial_edge=trim(metric_type) /= 'Minkowski' .and. direction == DIR_X .and. face+face_offset <= 0
+      if (method /= REC_GODUNOV .and. use_shock_sensor) then
+        pmin=minval(prim(eq_pr,face-2:face+3))
+        pmax=maxval(prim(eq_pr,face-2:face+3))
+        rmin=minval(prim(eq_de,face-2:face+3))
+        rmax=maxval(prim(eq_de,face-2:face+3))
+        jp=0.0d0
+        jr=0.0d0
+        if (pmax > 1.0d3*p_floor) jp=(pmax-pmin)/max(pmin,p_floor)
+        if (rmax > 1.0d3*rho_floor) jr=(rmax-rmin)/max(rmin,rho_floor)
+        near_geometry=rec_method_id == REC_MP5 .and. trim(metric_type) /= 'Minkowski' .and. &
+          ((direction == DIR_X .and. face+face_offset <= 3) .or. &
+           (direction == DIR_Y .and. (face+face_offset <= 2 .or. face+face_offset >= global_nodes-2)))
+        if (radial_edge .or. min(prim(eq_de,face),prim(eq_de,face+1)) <= shock_sensor_thresholds(7)*rho_floor .or. &
+            jp >= pg .or. jr >= rg) then
+          method=REC_GODUNOV
+        else if (rec_method_id >= REC_WENO3 .and. (jp >= pt .or. jr >= rt)) then
+          method=REC_TVD
+        else if (rec_method_id >= REC_MP5 .and. (jp >= pw .or. jr >= rw .or. near_geometry)) then
+          method=REC_WENO3
+        end if
+      else if (rec_method_id >= REC_WENO3 .and. radial_edge) then
+        method=REC_GODUNOV
+      end if
+      counts(method)=counts(method)+1_int64
+      if (left(eq_de,face) < rho_floor) counts(6)=counts(6)+1_int64
+      if (right(eq_de,face) < rho_floor) counts(6)=counts(6)+1_int64
+      if (left(eq_pr,face) < p_floor) counts(7)=counts(7)+1_int64
+      if (right(eq_pr,face) < p_floor) counts(7)=counts(7)+1_int64
+    end do
+    do event=1,7
+      call count_numerical_event(event,counts(event))
+    end do
+  end subroutine audit_reconstruction_strip
+
+end module reconstruction

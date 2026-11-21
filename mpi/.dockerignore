@@ -1,0 +1,15 @@
+# Only source files needed for CPU builds and the packaging check enter Docker.
+**
+!Dockerfile
+!.dockerignore
+!Makefile
+!/*.f90
+!tests/
+!tests/*.f90
+!tests/*.py
+!tools/
+!tools/*.f90
+!tools/*.py
+!containers/
+!containers/smoke.py
+!containers/sod.par

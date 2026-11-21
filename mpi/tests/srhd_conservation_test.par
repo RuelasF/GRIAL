@@ -1,0 +1,12 @@
+problem = convergence
+nx = 64
+ny = 1
+nz = 1
+reconstruction = mp5
+riemann_solver = hlle
+shock_sensor = true
+numerical_diagnostics = true
+final_time = 0.2
+extract_gw = false
+extract_mdot = false
+output_folder = tests/conservation_output

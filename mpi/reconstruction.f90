@@ -387,18 +387,24 @@ contains
   ! NÚCLEO PRINCIPAL DE RECONSTRUCCIÓN (Arquitectura Híbrida Vectorizada)
   ! ===================================================================================
 
-  subroutine reconstruct_1d_core(prim_1d, nodes, q_L, q_R, sweep_dir, face_offset, global_nodes)
+  subroutine reconstruct_1d_core(prim_1d, nodes, q_L, q_R, sweep_dir, face_offset, global_nodes, face_begin, face_end)
     implicit none
     real*8, intent(in)  :: prim_1d(neq, -nghost:nodes+nghost)
     integer, intent(in) :: nodes, sweep_dir
-    integer, intent(in), optional :: face_offset,global_nodes
-    real*8, intent(out) :: q_L(neq, 0:nodes), q_R(neq, 0:nodes)
-    integer :: i, k, first_face,total_nodes
+    integer, intent(in), optional :: face_offset,global_nodes,face_begin,face_end
+    real*8, intent(inout) :: q_L(neq, 0:nodes), q_R(neq, 0:nodes)
+    integer :: i, k, first_face,total_nodes,lo_face,hi_face
     real*8  :: s_min_L, s_max_L, s_min_R, s_max_R
     real*8  :: p_jump, p_min, p_max
     real*8  :: rho_jump, rho_min, rho_max
     real*8 :: atm_factor,p_tol_tvd,rho_tol_tvd,p_tol_weno,rho_tol_weno,p_tol_godunov,rho_tol_godunov
 
+    lo_face=0
+    hi_face=nodes
+    if (present(face_begin)) lo_face=face_begin
+    if (present(face_end)) hi_face=face_end
+    if (lo_face<0.or.hi_face>nodes) error stop 'invalid reconstruction face range'
+    if (hi_face<lo_face) return
     first_face=0
     total_nodes=nodes
     if (present(face_offset)) first_face=face_offset
@@ -418,7 +424,7 @@ contains
     case(REC_GODUNOV)
 
     !$OMP PARALLEL DO PRIVATE(i)
-      do i = 0, nodes
+      do i = lo_face, hi_face
         q_L(:, i) = prim_1d(:, i)
         q_R(:, i) = prim_1d(:, i+1)
       end do
@@ -428,7 +434,7 @@ contains
 
     if (use_shock_sensor) then
       !$OMP PARALLEL DO PRIVATE(k, i, s_min_L, s_max_L, s_min_R, s_max_R, p_max, p_min, p_jump, rho_max, rho_min, rho_jump)
-        do i = 0, nodes
+        do i = lo_face, hi_face
           p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
                       prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
           p_min = min(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
@@ -475,7 +481,7 @@ contains
     else
       !$OMP PARALLEL DO PRIVATE(k,i,s_min_L,s_max_L,s_min_R,s_max_R)
         do k = 1, neq
-          do i = 0, nodes
+          do i = lo_face, hi_face
             s_min_L = prim_1d(k, i) - prim_1d(k, i-1)
             s_max_L = prim_1d(k, i+1) - prim_1d(k, i)
             q_L(k, i) = prim_1d(k, i) + 0.5d0 * tvd_slope(s_min_L, s_max_L, tvd_limiter_id)
@@ -493,7 +499,7 @@ contains
 
     if (use_shock_sensor) then
       !$OMP PARALLEL DO PRIVATE(k, i, s_min_L, s_max_L, s_min_R, s_max_R, p_max, p_min, p_jump, rho_max, rho_min, rho_jump)
-        do i = 0, nodes
+        do i = lo_face, hi_face
 
           p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
                       prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
@@ -549,7 +555,7 @@ contains
       !$OMP END PARALLEL DO
     else
       !$OMP PARALLEL DO PRIVATE(k, i)
-        do i = 0, nodes
+        do i = lo_face, hi_face
           do k = 1, neq
             ! Fronteras Geométricas Estrictas (Ahora incluye protección polar)
             if (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_X .and. i+first_face <= 0) then
@@ -570,7 +576,7 @@ contains
 
     if (use_shock_sensor) then
       !$OMP PARALLEL DO PRIVATE(k, i, s_min_L, s_max_L, s_min_R, s_max_R, p_max, p_min, p_jump, rho_max, rho_min, rho_jump)
-        do i = 0, nodes
+        do i = lo_face, hi_face
 
           p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
                       prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
@@ -634,7 +640,7 @@ contains
       !$OMP END PARALLEL DO
     else
       !$OMP PARALLEL DO PRIVATE(k, i)
-        do i = 0, nodes
+        do i = lo_face, hi_face
           do k = 1, neq
             ! Fronteras Geométricas Estrictas
             if (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_X .and. i+first_face <= 0) then
@@ -654,7 +660,7 @@ contains
 
     if (use_shock_sensor) then
       !$OMP PARALLEL DO PRIVATE(k, i, s_min_L, s_max_L, s_min_R, s_max_R, p_max, p_min, p_jump, rho_max, rho_min, rho_jump)
-        do i = 0, nodes
+        do i = lo_face, hi_face
 
           p_max = max(prim_1d(eq_pr, i-2), prim_1d(eq_pr, i-1), prim_1d(eq_pr, i), &
                       prim_1d(eq_pr, i+1), prim_1d(eq_pr, i+2), prim_1d(eq_pr, i+3))
@@ -725,7 +731,7 @@ contains
       !$OMP END PARALLEL DO
     else
       !$OMP PARALLEL DO PRIVATE(k, i)
-        do i = 0, nodes
+        do i = lo_face, hi_face
           do k = 1, neq
             if (trim(metric_type) /= 'Minkowski' .and. sweep_dir == DIR_X .and. i+first_face <= 0) then
               q_L(k, i) = prim_1d(k, i)
@@ -744,11 +750,11 @@ contains
 
     ! Observa la política aplicada por el backend CPU antes de sus floors.
     if (do_numerical_diagnostics) call audit_reconstruction_strip(prim_1d,nodes,sweep_dir, &
-      q_L,q_R,p_tol_tvd,rho_tol_tvd,p_tol_weno,rho_tol_weno,p_tol_godunov,rho_tol_godunov,first_face,total_nodes)
+      q_L,q_R,p_tol_tvd,rho_tol_tvd,p_tol_weno,rho_tol_weno,p_tol_godunov,rho_tol_godunov,first_face,total_nodes,lo_face,hi_face)
 
     ! Escudo de positividad absoluta
     !$OMP PARALLEL DO PRIVATE(i)
-    do i = 0, nodes
+    do i = lo_face, hi_face
       q_L(eq_de, i) = max(q_L(eq_de, i), rho_floor)
       q_R(eq_de, i) = max(q_R(eq_de, i), rho_floor)
       q_L(eq_pr, i) = max(q_L(eq_pr, i), p_floor)
@@ -758,8 +764,8 @@ contains
 
   end subroutine reconstruct_1d_core
 
-  subroutine audit_reconstruction_strip(prim,nodes,direction,left,right,pt,rt,pw,rw,pg,rg,face_offset,global_nodes)
-    integer, intent(in) :: nodes,direction,face_offset,global_nodes
+  subroutine audit_reconstruction_strip(prim,nodes,direction,left,right,pt,rt,pw,rw,pg,rg,face_offset,global_nodes,lo_face,hi_face)
+    integer, intent(in) :: nodes,direction,face_offset,global_nodes,lo_face,hi_face
     real*8, intent(in) :: prim(neq,-nghost:nodes+nghost),left(neq,0:nodes),right(neq,0:nodes)
     real*8, intent(in) :: pt,rt,pw,rw,pg,rg
     integer :: face,method,event
@@ -767,7 +773,7 @@ contains
     real*8 :: pmin,pmax,rmin,rmax,jp,jr
     logical :: radial_edge,near_geometry
     counts=0_int64
-    do face=0,nodes
+    do face=lo_face,hi_face
       method=rec_method_id
       radial_edge=trim(metric_type) /= 'Minkowski' .and. direction == DIR_X .and. face+face_offset <= 0
       if (method /= REC_GODUNOV .and. use_shock_sensor) then

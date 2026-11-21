@@ -280,6 +280,7 @@ contains
     real*8  :: det_local, dlna_local(0:3)
     real*8  :: chris_local(0:3,0:3,0:3), dg_local(0:3,0:3,1:3)
 
+    metric_cache_generation=metric_cache_generation+1_int64
     print *, "--> Pre-calculando Caché de Métrica 3+1 ..."
 
     ! ========================================================

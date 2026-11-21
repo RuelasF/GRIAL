@@ -228,6 +228,9 @@ contains
     if(.not.resume)then
       call sample_parallel_observer(calendar,.true.);call vtk_now()
     end if
+#ifdef GRIAL_PROFILE
+    call profile_reset()
+#endif
     start_step=n_steps;max_step=0.0d0;checkpoint_cost=0.0d0
     last_checkpoint_wall=wall_time_seconds();setup_seconds=last_checkpoint_wall-started
     reason='running';call publish_status()
@@ -236,11 +239,30 @@ contains
       if(budget>0.0d0)stop_requested=wall_time_seconds()-started+max_step>=budget-margin-checkpoint_cost
       if(any_time_request(stop_requested))exit
       step_started=wall_time_seconds()
+#ifdef GRIAL_PROFILE
+      block
+        real*8 :: profile_start
+        profile_start=profile_clock()
+        call update_adaptive_dt()
+        call profile_add(1,profile_start)
+      end block
+      dt=clip_step_to_target(integration_time,dt,final_time)
+#else
       call update_adaptive_dt();dt=clip_step_to_target(integration_time,dt,final_time)
+#endif
       call parallel_require_collective(n_steps<huge(1),'step count exceeds integer range')
       n_steps=n_steps+1;integration_time=integration_time+dt
       call advance_rk_step(.true.);call apply_parallel_perturbation(layout,injected)
+#ifdef GRIAL_PROFILE
+      block
+        real*8 :: profile_start
+        profile_start=profile_clock()
+        call sample_parallel_observer(calendar)
+        call profile_add(5,profile_start)
+      end block
+#else
       call sample_parallel_observer(calendar)
+#endif
       if(integration_time>=calendar%next_save)then
         call vtk_now()
         calendar%next_save=calendar%next_save+save_interval;calendar%save_index=calendar%save_index+1_int64
@@ -256,6 +278,9 @@ contains
       end if
       max_step=max(max_step,wall_time_seconds()-step_started)
     end do
+#ifdef GRIAL_PROFILE
+    call profile_report()
+#endif
     call sample_parallel_observer(calendar,.true.);call vtk_now();call checkpoint_now()
     reason='completed'
     if(integration_time<final_time)reason='stopped_for_walltime'

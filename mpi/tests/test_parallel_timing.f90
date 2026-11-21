@@ -81,6 +81,8 @@ contains
       if (global_i==37) gamma_inv_c(2,2,i,j,k)=400.0d0
       if (global_i==19) gamma_inv_c(3,3,i,j,k)=900.0d0
     end do;end do;end do
+    ! Synthetic geometry writes bypass precalculate_metric_cache. Publish their generation.
+    metric_cache_generation=metric_cache_generation+1_int64
   end subroutine synthetic_cache
 
   subroutine check_directional_maxima(dim,shifted)

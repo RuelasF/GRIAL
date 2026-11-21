@@ -36,9 +36,27 @@ contains
     if (parallel_size>1) then
       call parallel_require_active()
 #ifdef USE_MPI
+#ifdef GRIAL_PROFILE
+      block
+        real*8 :: collective_start
+        collective_start=profile_clock()
+#endif
       call MPI_Allreduce(signature,minimum,size(signature),MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+        call profile_label_add('parallel_timing:agree_metadata:1',collective_start)
+      end block
+#endif
       call parallel_check_mpi(status,trim(label)//' minimum')
+#ifdef GRIAL_PROFILE
+      block
+        real*8 :: collective_start
+        collective_start=profile_clock()
+#endif
       call MPI_Allreduce(signature,maximum,size(signature),MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+        call profile_label_add('parallel_timing:agree_metadata:2',collective_start)
+      end block
+#endif
       call parallel_check_mpi(status,trim(label)//' maximum')
 #endif
     end if
@@ -92,7 +110,16 @@ contains
     if (parallel_size>1) then
       call parallel_require_active()
 #ifdef USE_MPI
+#ifdef GRIAL_PROFILE
+      block
+        real*8 :: collective_start
+        collective_start=profile_clock()
+#endif
       call MPI_Allreduce(local,global,4,MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+        call profile_label_add('parallel_timing:reduce_causal_maxima:3',collective_start)
+      end block
+#endif
       call parallel_check_mpi(status,'global directional causal maxima')
 #endif
     end if
@@ -150,7 +177,16 @@ contains
     requests=local_requests
 #ifdef USE_MPI
     if (parallel_size>1) then
+#ifdef GRIAL_PROFILE
+      block
+        real*8 :: collective_start
+        collective_start=profile_clock()
+#endif
       call MPI_Allreduce(local_requests,requests,2,MPI_LOGICAL,MPI_LOR,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+        call profile_label_add('parallel_timing:coordinate_time_actions:4',collective_start)
+      end block
+#endif
       call parallel_check_mpi(status,'checkpoint and stop requests')
     end if
 #endif
@@ -171,7 +207,16 @@ contains
     request=local_request
 #ifdef USE_MPI
     if (parallel_size>1) then
+#ifdef GRIAL_PROFILE
+      block
+        real*8 :: collective_start
+        collective_start=profile_clock()
+#endif
       call MPI_Allreduce(local_request,request,1,MPI_LOGICAL,MPI_LOR,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+        call profile_label_add('parallel_timing:any_time_request:5',collective_start)
+      end block
+#endif
       call parallel_check_mpi(status,'walltime checkpoint request')
     end if
 #endif

@@ -28,7 +28,16 @@ contains
     integer,intent(inout)::status
 #ifdef USE_MPI
     integer::rc
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,rc)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_visualization:agree_status:1',collective_start)
+    end block
+#endif
     call parallel_check_mpi(rc,'VTK writer status')
 #endif
   end subroutine agree_status

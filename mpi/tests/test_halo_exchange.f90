@@ -16,6 +16,9 @@ program test_halo_exchange
   call parallel_initialize()
   call get_command_argument(1,mode)
   if (len_trim(mode)>0.and.trim(mode)/='report') call check_failure_mode()
+#ifdef GRIAL_OVERLAP
+  if (parallel_size==4) call check_polar_overlap()
+#endif
   do depth=1,3
     do kind=1,15
       do alias=0,1
@@ -130,9 +133,9 @@ contains
     type(domain_layout) :: layout
     character(len=160) :: message
     integer :: shape_global(3),i,j,k,m,global_i,epoch
-    logical :: periodic,has_data
+    logical :: periodic,has_data,started
     real*8 :: expected,error
-    real*8, allocatable :: reference(:,:,:,:,:)
+    real*8, allocatable :: reference(:,:,:,:,:),baseline(:,:,:,:)
 
     call configure(which,h,numeric,shape_global,periodic)
     call allocate_and_grid()
@@ -188,11 +191,63 @@ contains
           reference(x_global_offset+1-h:x_global_offset+nx+h,:,:,:,epoch)))
       end if
       call require(error==0.0d0,'all filled halos, edges and corners match serial boundaries')
+      if (which==5.and.parallel_size>1) then
+        allocate(baseline,source=p)
+        call seed_physical(epoch)
+        call begin_radial_overlap(p,started)
+        call require(started,'jet radial overlap was not started')
+        call end_radial_overlap(p)
+        call require(all(p==baseline),'nonblocking jet halos differ from blocking halos')
+        deallocate(baseline)
+      end if
     end do
     call finalize_halo_exchange()
     call release_grid()
     fixtures=fixtures+1
   end subroutine check_case
+
+#ifdef GRIAL_OVERLAP
+  subroutine check_polar_overlap()
+    type(domain_layout) :: layout
+    character(len=160) :: message
+    integer :: shape_global(3),h,model,epoch,grid_index
+    logical :: periodic,started,polar_started
+    real*8, allocatable :: baseline(:,:,:,:)
+    do model=12,15,3
+      do h=1,3
+        do grid_index=1,2
+          call configure(model,h,.false.,shape_global,periodic)
+          shape_global=[37,16,8]
+          if (grid_index==1) then
+            call build_domain(shape_global,h,parallel_rank,parallel_size,.false.,layout,message,[2,2],.false.)
+          else
+            call build_domain(shape_global,h,parallel_rank,parallel_size,.false.,layout,message,[1,4],.false.)
+          end if
+          call parallel_require_collective(len_trim(message)==0,message)
+          nx=shape_global(1);ny=shape_global(2);nz=shape_global(3)
+          call allocate_and_grid(layout)
+          call precalculate_metric_cache()
+          call initialize_halo_exchange(layout)
+          do epoch=1,2
+            call seed_physical(epoch)
+            call fill_primitive_halos(p)
+            allocate(baseline,source=p)
+            call seed_physical(epoch)
+            call begin_radial_overlap(p,started)
+            call require(started,'torus overlap not started')
+            call end_radial_overlap(p,polar_started)
+            call require(polar_started,'torus polar overlap not started')
+            call finish_polar_overlap(p)
+            call require(all(p==baseline),'nonblocking polar halos, edges or corners differ')
+            deallocate(baseline)
+          end do
+          call finalize_halo_exchange()
+          call release_grid()
+        end do
+      end do
+    end do
+  end subroutine check_polar_overlap
+#endif
 
   subroutine check_failure_mode()
     type(domain_layout) :: layout

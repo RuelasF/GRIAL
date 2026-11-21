@@ -36,6 +36,35 @@ para validar parámetros con `--check` y continuar con `--resume`. La
 [guía de contenedores](containers/README.md) describe el Dockerfile CPU.
 La [procedencia](PROVENANCE.json) registra las fuentes hidrodinámicas de partida.
 
+## Elegir el intercambio MPI
+
+Esta versión incorpora las fuentes de la copia hidrodinámica optimizada. El
+intercambio bloqueante sigue siendo la configuración de referencia.
+
+| Compilación | Ejecutable | Intercambio |
+| --- | --- | --- |
+| `make USE_MPI=1 OVERLAP=0 ARCH_FLAGS=''` | `./grial_mpi` | Bloqueante, con `MPI_Sendrecv` |
+| `make USE_MPI=1 OVERLAP=1 ARCH_FLAGS=''` | `./grial_mpi_overlap` | No bloqueante, con solapamiento experimental |
+
+Ambas compilaciones pueden coexistir. Lanza el ejecutable elegido con los
+mismos argumentos MPI, archivo de parámetros y reparto. Usa un directorio
+de salida nuevo para cada corrida. La variante con solapamiento adelanta
+cálculo interior del jet y los toros FD/FM 3D mientras intercambia halos
+radiales y, cuando hay reparto polar, también polares. En CADS el efecto en
+rendimiento varió según el problema y el reparto.
+
+También puedes añadir `CFL_CACHE=1` para reutilizar el límite causal del paso
+de tiempo calculado sobre la geometría fija. La opción viene desactivada y
+agrega el sufijo `_cfl_cache` al ejecutable. `PROFILE=1` construye el perfilador
+`grial_mpi_profile` y requiere `OVERLAP=0`.
+
+Desde un clon existente de la rama `mpi-hidro`, ejecuta `git pull --ff-only`
+y recompila la variante deseada desde `mpi/`.
+
+La regresión `make USE_MPI=1 ARCH_FLAGS='' test` puede ejecutarse en el clon
+público. Las autopruebas del controlador de campañas largas de SRHD requieren
+el script de Slurm de la instalación local.
+
 ## Checkpoints distribuidos
 
 C01 guarda bloques físicos UP/P, configuración global, contadores y época; publica un manifiesto y un marcador final después de comprobar tamaños y leer los datos guardados. Una escritura incompleta deja la generación sin publicar y conserva la anterior. La recuperación al mismo reparto comprueba todos los bloques antes de modificar la memoria. [API, formato, pruebas y límites](docs/CHECKPOINT_DISTRIBUIDO_C01.md).

@@ -12,12 +12,20 @@ module halo_exchange
   private
   public :: initialize_halo_exchange, exchange_primitive_halos, fill_primitive_halos, finalize_halo_exchange
   public :: halo_layout_ready
+  public :: begin_radial_overlap, end_radial_overlap, finish_polar_overlap
   type(domain_layout) :: domain
   logical :: initialized=.false.
   character(len=len(case_name)) :: boundary_name=''
   real*8, allocatable :: send_buffer(:,:,:,:),receive_buffer(:,:,:,:)
   real*8, allocatable :: polar_send(:,:,:,:),polar_receive(:,:,:,:)
   integer :: buffer_count=0,polar_count=0
+#ifdef USE_MPI
+  real*8, allocatable, asynchronous :: overlap_send(:,:,:,:,:),overlap_recv(:,:,:,:,:)
+  real*8, allocatable, asynchronous :: overlap_polar_send(:,:,:,:,:),overlap_polar_recv(:,:,:,:,:)
+  type(MPI_Request) :: overlap_requests(4),polar_requests(4)
+  logical :: polar_active=.false.
+  logical :: overlap_active=.false.
+#endif
 #ifdef USE_MPI
   integer :: lower_peer,upper_peer,lower_polar,upper_polar
 #endif
@@ -80,9 +88,27 @@ contains
       signature(9+i)=iachar(case_name(i:i))
     end do
 #ifdef USE_MPI
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(signature,minimum,size(signature),MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('halo_exchange:initialize_halo_exchange:1',collective_start)
+    end block
+#endif
     call parallel_check_mpi(status,'halo global configuration minimum')
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(signature,maximum,size(signature),MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('halo_exchange:initialize_halo_exchange:2',collective_start)
+    end block
+#endif
     call parallel_check_mpi(status,'halo global configuration maximum')
     call parallel_require_collective(all(minimum==maximum),'inconsistent halo configuration between ranks')
 #endif
@@ -198,6 +224,129 @@ contains
 #endif
   end subroutine exchange_primitive_halos
 
+  ! Experimental radial-only exchange. Buffers stay alive until the matching wait.
+  subroutine begin_radial_overlap(q_state,started)
+    real*8, intent(in) :: q_state(-nghost:,-nghost:,-nghost:,:)
+    logical, intent(out) :: started
+#ifdef USE_MPI
+    integer :: status
+    call parallel_require_active()
+    if (.not.initialized) call parallel_abort('halo exchange is not initialized')
+    if (overlap_active.or.polar_active) call parallel_abort('overlap exchange already active')
+    started=parallel_size>1.and. &
+      (trim(case_name)=='Jet'.or.trim(case_name)=='5'.or. &
+       trim(case_name)=='FontDaigne3D'.or.trim(case_name)=='12'.or. &
+       trim(case_name)=='FishMonc3D'.or.trim(case_name)=='15')
+    if (.not.started) return
+    if (.not.allocated(overlap_send)) then
+      allocate(overlap_send(nghost,ny,nz,neq,2),overlap_recv(nghost,ny,nz,neq,2),stat=status)
+      if (status/=0) call parallel_abort('overlap buffer allocation failed')
+    end if
+    overlap_send(:,:,:,:,1)=q_state(1:nghost,1:ny,1:nz,:)
+    overlap_send(:,:,:,:,2)=q_state(nx-nghost+1:nx,1:ny,1:nz,:)
+    call MPI_Irecv(overlap_recv(:,:,:,:,1),buffer_count,MPI_DOUBLE_PRECISION,upper_peer,201, &
+      MPI_COMM_WORLD,overlap_requests(1),status)
+    call parallel_check_mpi(status,'overlap receive right')
+    call MPI_Irecv(overlap_recv(:,:,:,:,2),buffer_count,MPI_DOUBLE_PRECISION,lower_peer,202, &
+      MPI_COMM_WORLD,overlap_requests(2),status)
+    call parallel_check_mpi(status,'overlap receive left')
+    call MPI_Isend(overlap_send(:,:,:,:,1),buffer_count,MPI_DOUBLE_PRECISION,lower_peer,201, &
+      MPI_COMM_WORLD,overlap_requests(3),status)
+    call parallel_check_mpi(status,'overlap send left')
+    call MPI_Isend(overlap_send(:,:,:,:,2),buffer_count,MPI_DOUBLE_PRECISION,upper_peer,202, &
+      MPI_COMM_WORLD,overlap_requests(4),status)
+    call parallel_check_mpi(status,'overlap send right')
+    overlap_active=.true.
+#else
+    started=.false.
+#endif
+  end subroutine begin_radial_overlap
+
+  subroutine end_radial_overlap(q_state,polar_started)
+    real*8, intent(inout) :: q_state(-nghost:,-nghost:,-nghost:,:)
+    logical, intent(out), optional :: polar_started
+#ifdef USE_MPI
+    integer :: status,received_count
+    type(MPI_Status) :: receipts(4)
+    if (.not.overlap_active) call parallel_abort('overlap exchange is not active')
+    call MPI_Waitall(4,overlap_requests,receipts,status)
+    call parallel_check_mpi(status,'overlap wait')
+    if (upper_peer/=MPI_PROC_NULL) then
+      call MPI_Get_count(receipts(1),MPI_DOUBLE_PRECISION,received_count,status)
+      call parallel_check_mpi(status,'overlap right count')
+      if (received_count/=buffer_count) call parallel_abort('incomplete right overlap halo')
+      q_state(nx+1:nx+nghost,1:ny,1:nz,:)=overlap_recv(:,:,:,:,1)
+    end if
+    if (lower_peer/=MPI_PROC_NULL) then
+      call MPI_Get_count(receipts(2),MPI_DOUBLE_PRECISION,received_count,status)
+      call parallel_check_mpi(status,'overlap left count')
+      if (received_count/=buffer_count) call parallel_abort('incomplete left overlap halo')
+      q_state(1-nghost:0,1:ny,1:nz,:)=overlap_recv(:,:,:,:,2)
+    end if
+    overlap_active=.false.
+    if (present(polar_started)) polar_started=.false.
+    if (domain%process_shape(2)==1) then
+      call set_boundary_conditions(q_state,domain%physical_lower(1),domain%physical_upper(1))
+    else
+      call set_boundary_conditions(q_state,domain%physical_lower(1),domain%physical_upper(1),.false.,.false.)
+      if (.not.allocated(overlap_polar_send)) then
+        allocate(overlap_polar_send(nx+2*nghost,nghost,nz,neq,2), &
+                 overlap_polar_recv(nx+2*nghost,nghost,nz,neq,2),stat=status)
+        if (status/=0) call parallel_abort('polar overlap buffer allocation failed')
+      end if
+      overlap_polar_send(:,:,:,:,1)=q_state(1-nghost:nx+nghost,1:nghost,1:nz,:)
+      overlap_polar_send(:,:,:,:,2)=q_state(1-nghost:nx+nghost,ny-nghost+1:ny,1:nz,:)
+      call MPI_Irecv(overlap_polar_recv(:,:,:,:,1),polar_count,MPI_DOUBLE_PRECISION,upper_polar,211, &
+                     MPI_COMM_WORLD,polar_requests(1),status)
+      call parallel_check_mpi(status,'overlap polar receive upper')
+      call MPI_Irecv(overlap_polar_recv(:,:,:,:,2),polar_count,MPI_DOUBLE_PRECISION,lower_polar,212, &
+                     MPI_COMM_WORLD,polar_requests(2),status)
+      call parallel_check_mpi(status,'overlap polar receive lower')
+      call MPI_Isend(overlap_polar_send(:,:,:,:,1),polar_count,MPI_DOUBLE_PRECISION,lower_polar,211, &
+                     MPI_COMM_WORLD,polar_requests(3),status)
+      call parallel_check_mpi(status,'overlap polar send lower')
+      call MPI_Isend(overlap_polar_send(:,:,:,:,2),polar_count,MPI_DOUBLE_PRECISION,upper_polar,212, &
+                     MPI_COMM_WORLD,polar_requests(4),status)
+      call parallel_check_mpi(status,'overlap polar send upper')
+      polar_active=.true.
+      if (present(polar_started)) then
+        polar_started=.true.
+      else
+        call finish_polar_overlap(q_state)
+      end if
+    end if
+#else
+    call parallel_abort('overlap requires MPI')
+#endif
+  end subroutine end_radial_overlap
+
+  subroutine finish_polar_overlap(q_state)
+    real*8, intent(inout) :: q_state(-nghost:,-nghost:,-nghost:,:)
+#ifdef USE_MPI
+    integer :: status,received_count
+    type(MPI_Status) :: receipts(4)
+    if (.not.polar_active) call parallel_abort('polar overlap is not active')
+    call MPI_Waitall(4,polar_requests,receipts,status)
+    call parallel_check_mpi(status,'polar overlap wait')
+    if (upper_polar/=MPI_PROC_NULL) then
+      call MPI_Get_count(receipts(1),MPI_DOUBLE_PRECISION,received_count,status)
+      call parallel_check_mpi(status,'polar overlap upper count')
+      if (received_count/=polar_count) call parallel_abort('incomplete upper polar overlap')
+      q_state(1-nghost:nx+nghost,ny+1:ny+nghost,1:nz,:)=overlap_polar_recv(:,:,:,:,1)
+    end if
+    if (lower_polar/=MPI_PROC_NULL) then
+      call MPI_Get_count(receipts(2),MPI_DOUBLE_PRECISION,received_count,status)
+      call parallel_check_mpi(status,'polar overlap lower count')
+      if (received_count/=polar_count) call parallel_abort('incomplete lower polar overlap')
+      q_state(1-nghost:nx+nghost,1-nghost:0,1:nz,:)=overlap_polar_recv(:,:,:,:,2)
+    end if
+    polar_active=.false.
+    call set_boundary_conditions(q_state,.false.,.false.,domain%physical_lower(2),domain%physical_upper(2))
+#else
+    call parallel_abort('polar overlap requires MPI')
+#endif
+  end subroutine finish_polar_overlap
+
   subroutine fill_primitive_halos(q_state)
     real*8, intent(inout) :: q_state(-nghost:,-nghost:,-nghost:,:)
     call exchange_primitive_halos(q_state)
@@ -241,6 +390,11 @@ contains
 
   subroutine finalize_halo_exchange()
     call parallel_require_active()
+#ifdef USE_MPI
+    if (overlap_active.or.polar_active) call parallel_abort('cannot finalize active overlap')
+    if (allocated(overlap_send)) deallocate(overlap_send,overlap_recv)
+    if (allocated(overlap_polar_send)) deallocate(overlap_polar_send,overlap_polar_recv)
+#endif
     if (allocated(send_buffer)) deallocate(send_buffer)
     if (allocated(receive_buffer)) deallocate(receive_buffer)
     if (allocated(polar_send)) deallocate(polar_send,polar_receive)

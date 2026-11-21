@@ -1,5 +1,12 @@
 USE_MPI ?= 0
 MPIFC ?= mpifort
+CFL_CACHE ?= 0
+ifneq ($(filter $(CFL_CACHE),0 1),$(CFL_CACHE))
+$(error CFL_CACHE must be 0 or 1)
+endif
+ifeq ($(OVERLAP)$(PROFILE),11)
+$(error OVERLAP=1 and PROFILE=1 require separate build variants)
+endif
 SRC_DIR ?= .
 .DEFAULT_GOAL := all
 
@@ -12,12 +19,26 @@ $(error M01 supports CPU MPI only)
 endif
 ifneq ($(MPI_BUILD_INTERNAL),1)
 MPI_FORWARD_GOALS := $(if $(MAKECMDGOALS),$(MAKECMDGOALS),all)
+ifeq ($(OVERLAP),1)
+MPI_BUILD_DIR := .build/mpi_overlap
+MPI_EXEC_LINK := grial_mpi_overlap
+else ifeq ($(PROFILE),1)
+MPI_BUILD_DIR := .build/mpi_profile
+MPI_EXEC_LINK := grial_mpi_profile
+else
+MPI_BUILD_DIR := .build/mpi
+MPI_EXEC_LINK := grial_mpi
+endif
+ifeq ($(CFL_CACHE),1)
+MPI_BUILD_DIR := $(MPI_BUILD_DIR)_cfl_cache
+MPI_EXEC_LINK := $(MPI_EXEC_LINK)_cfl_cache
+endif
 .PHONY: __mpi_forward $(MPI_FORWARD_GOALS)
 $(MPI_FORWARD_GOALS): __mpi_forward ;
 __mpi_forward:
-	@mkdir -p .build/mpi/tests .build/mpi/analysis
-	+$(MAKE) -C .build/mpi -f $(abspath Makefile) USE_MPI=1 MPI_BUILD_INTERNAL=1 SRC_DIR=$(CURDIR) $(MPI_FORWARD_GOALS)
-	@if test -f .build/mpi/grial_mpi; then ln -sfn .build/mpi/grial_mpi grial_mpi; fi
+	@mkdir -p $(MPI_BUILD_DIR)/tests $(MPI_BUILD_DIR)/analysis
+	+$(MAKE) -C $(MPI_BUILD_DIR) -f $(abspath Makefile) USE_MPI=1 MPI_BUILD_INTERNAL=1 SRC_DIR=$(CURDIR) $(MPI_FORWARD_GOALS)
+	@if test -f $(MPI_BUILD_DIR)/grial_mpi; then ln -sfn $(MPI_BUILD_DIR)/grial_mpi $(MPI_EXEC_LINK); fi
 else
 MPI_BUILD_INTERNAL_BODY := 1
 endif
@@ -38,6 +59,15 @@ endif
 PYTHON ?= python3
 ARCH_FLAGS ?= -march=native
 FFLAGS = -O3 -fopenmp $(ARCH_FLAGS) -flto=auto -fno-math-errno -fno-trapping-math -ffree-line-length-none -cpp
+ifeq ($(OVERLAP),1)
+override FFLAGS += -DGRIAL_OVERLAP
+endif
+ifeq ($(PROFILE),1)
+override FFLAGS += -DGRIAL_PROFILE
+endif
+ifeq ($(CFL_CACHE),1)
+override FFLAGS += -DGRIAL_CFL_CACHE
+endif
 #FFLAGS = -fopenmp -O0 -g -fbacktrace -Wall -Wextra -fcheck=all -finit-real=snan -ffpe-trap=invalid,zero,overflow,underflow,denormal
 
 ifeq ($(USE_MPI),1)
@@ -193,7 +223,11 @@ srhd-long-driver: $(filter-out grial.o,$(OBJS)) $(SRC_DIR)/tools/srhd_long_drive
 test-srhd-long:
 	$(PYTHON) $(SRC_DIR)/tests/test_srhd_long.py
 
-test: test-perturbations test-srhd-long test-observables test-diagnostics test-rtheta test-rk test-time test-interfaces test-halos test-domain test-parallel test-segments test-walltime test-hllc test-gw test-fd test-fm test-torus-parameters test-polar test-cfl test-minkowski-spherical test-cases test-checkpoint test-output test-acc-reconstruction test-acc-rhs test-numerical-diagnostics test-spatial-order test-sensor-boundaries test-sensor-symmetry test-khi-diagnostics test-michel-initial test-primitive-recovery test-srhd-conservation
+# The portable checkout excludes the site-specific Slurm campaign script.
+ifneq ($(wildcard $(SRC_DIR)/tools/srhd_long_campaign.py),)
+test: test-srhd-long
+endif
+test: test-perturbations test-observables test-diagnostics test-rtheta test-rk test-time test-interfaces test-halos test-domain test-parallel test-segments test-walltime test-hllc test-gw test-fd test-fm test-torus-parameters test-polar test-cfl test-minkowski-spherical test-cases test-checkpoint test-output test-acc-reconstruction test-acc-rhs test-numerical-diagnostics test-spatial-order test-sensor-boundaries test-sensor-symmetry test-khi-diagnostics test-michel-initial test-primitive-recovery test-srhd-conservation
 
 .PHONY: test-srhd-conservation
 test-srhd-conservation: variables.o parameters.o metrics.o conditions.o equations.o fluxes.o reconstruction.o evolution.o $(EVOLUTION_PARALLEL_OBJS) initialization.o domain_decomposition.o $(SRC_DIR)/tests/test_srhd_conservation.f90
@@ -278,6 +312,14 @@ test-polar: variables.o metrics.o conditions.o $(SRC_DIR)/tests/test_polar_bound
 test-cfl: variables.o metrics.o equations.o fluxes.o reconstruction.o evolution.o $(EVOLUTION_PARALLEL_OBJS) domain_decomposition.o $(SRC_DIR)/tests/test_multidimensional_cfl.f90
 	$(FC) $(FFLAGS) -o $(TEST_CFL_TARGET) $(SRC_DIR)/tests/test_multidimensional_cfl.f90 variables.o metrics.o equations.o fluxes.o reconstruction.o evolution.o $(EVOLUTION_PARALLEL_OBJS) domain_decomposition.o
 	./$(TEST_CFL_TARGET)
+
+cfl-cache-driver: variables.o metrics.o equations.o fluxes.o reconstruction.o evolution.o $(EVOLUTION_PARALLEL_OBJS) domain_decomposition.o $(SRC_DIR)/tests/test_cfl_cache.f90
+	$(FC) $(FFLAGS) -o tests/test_cfl_cache $(SRC_DIR)/tests/test_cfl_cache.f90 variables.o metrics.o equations.o fluxes.o reconstruction.o evolution.o $(EVOLUTION_PARALLEL_OBJS) domain_decomposition.o
+
+test-cfl-cache: cfl-cache-driver
+	./tests/test_cfl_cache
+
+test: test-cfl-cache
 
 test-minkowski-spherical: variables.o metrics.o $(SRC_DIR)/tests/test_minkowski_spherical.f90
 	$(FC) $(FFLAGS) -o $(TEST_MINKOWSKI_SPHERICAL_TARGET) $(SRC_DIR)/tests/test_minkowski_spherical.f90 variables.o metrics.o

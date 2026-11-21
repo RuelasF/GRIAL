@@ -35,7 +35,16 @@ contains
     logical,intent(in)::local
 #ifdef USE_MPI
     integer::ios
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(local,ok,1,MPI_LOGICAL,MPI_LAND,MPI_COMM_WORLD,ios)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_observer:agreed:1',collective_start)
+    end block
+#endif
     call parallel_check_mpi(ios,'observer IO agreement')
 #else
     ok=local
@@ -76,9 +85,27 @@ contains
     call parallel_check_mpi(ios,'observer path agreement')
     call MPI_Type_match_size(MPI_TYPECLASS_INTEGER,storage_size(0_int64)/8,count_type,ios)
     call parallel_check_mpi(ios,'observer integer datatype')
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(values,lower,size(values),count_type,MPI_MIN,MPI_COMM_WORLD,ios)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_observer:agree_call:2',collective_start)
+    end block
+#endif
     call parallel_check_mpi(ios,'observer controls minimum')
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(values,upper,size(values),count_type,MPI_MAX,MPI_COMM_WORLD,ios)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_observer:agree_call:3',collective_start)
+    end block
+#endif
     call parallel_check_mpi(ios,'observer controls maximum')
     call parallel_require_collective(all(lower==upper),'observer call or calendar differs between ranks')
 #endif

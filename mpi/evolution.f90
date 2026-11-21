@@ -10,23 +10,144 @@
 ! =======================================================================================
 module evolution
   use variables
+  use parallel_runtime, only: parallel_size
+#ifdef GRIAL_PROFILE
+  use parallel_runtime, only: profile_clock,profile_add
+#endif
   use metrics
   use reconstruction
   use fluxes
   use equations
   use parallel_diagnostics, only: diagnostics_active,reset_rhs_budget,capture_boundary_fluxes,capture_source_sum
-  use parallel_timing, only: validate_cfl_context,reduce_causal_maxima,cfl_step_from_maxima
+#ifdef GRIAL_OVERLAP
+  use parallel_runtime, only: parallel_abort
+#endif
+  use parallel_timing, only: validate_cfl_context,reduce_causal_maxima,cfl_step_from_maxima,any_time_request
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
   public :: calc_rhs, update_adaptive_dt, initialize_rhs_accelerator, finalize_rhs_accelerator
   public :: calc_rhs_cpu, calc_rhs_accelerator
+#ifdef GRIAL_OVERLAP
+  public :: prepare_overlap_sources, prepare_overlap_polar_fluxes
+  real*8, allocatable :: overlap_sources(:,:,:,:), overlap_flux(:,:,:,:)
+  real*8, allocatable :: overlap_polar_flux(:,:,:,:)
+  logical :: overlap_sources_ready=.false.,overlap_polar_ready=.false.
+#endif
 
   real*8, allocatable :: qlx(:,:,:,:), qrx(:,:,:,:), fluxx(:,:,:,:)
   real*8, allocatable :: qly(:,:,:,:), qry(:,:,:,:), fluxy(:,:,:,:)
   real*8, allocatable :: qlz(:,:,:,:), qrz(:,:,:,:), fluxz(:,:,:,:)
 
+#ifdef GRIAL_CFL_CACHE
+  ! CPU stationary-metric cache. Raw edits of metric arrays must advance the
+  ! generation (production writes occur through precalculate_metric_cache).
+  logical :: causal_cache_ready=.false.
+  integer(int64) :: causal_cache_generation=-1_int64
+  integer :: causal_cache_layout(8)=0
+  real*8 :: causal_cache_parameters(4)=0.0d0,causal_cache_dt=0.0d0
+#endif
+
 contains
+
+#ifdef GRIAL_OVERLAP
+  ! Only physical cells are read, so no pending halo is needed.
+  subroutine prepare_overlap_sources(p_in)
+    real*8, intent(in) :: p_in(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq)
+    integer :: i,j,k,allocation_status
+    real*8, allocatable :: strip(:,:),left(:,:),right(:,:)
+    real*8 :: a,b(3),g(3,3),sqg
+    if (allocated(overlap_sources)) then
+      if (any(shape(overlap_sources)/=[nx,ny,nz,neq])) then
+        deallocate(overlap_sources,overlap_flux)
+      end if
+    end if
+    if (.not.allocated(overlap_sources)) then
+      allocate(overlap_sources(nx,ny,nz,neq),stat=allocation_status)
+      if (allocation_status/=0) call parallel_abort('overlap source allocation failed')
+      allocate(overlap_flux(neq,0:nx,ny,nz),stat=allocation_status)
+      if (allocation_status/=0) call parallel_abort('overlap flux allocation failed')
+    end if
+    !$OMP PARALLEL DO COLLAPSE(2) PRIVATE(i,j,k)
+    do k=1,nz
+      do j=1,ny
+        do i=1,nx
+          call calc_sources(p_in(i,j,k,:),overlap_sources(i,j,k,:),i,j,k)
+        end do
+      end do
+    end do
+    !$OMP END PARALLEL DO
+    if (nx>=6) then
+      !$OMP PARALLEL PRIVATE(i,j,k,strip,left,right,a,b,g,sqg)
+      allocate(strip(neq,-nghost:nx+nghost),left(neq,0:nx),right(neq,0:nx))
+      !$OMP DO COLLAPSE(2)
+      do k=1,nz
+        do j=1,ny
+          do i=1,nx
+            strip(:,i)=p_in(i,j,k,:)
+          end do
+          call reconstruct_1d_core(strip,nx,left,right,DIR_X,x_global_offset,max(nx,nx_global),3,nx-3)
+          do i=3,nx-3
+            if (trim(geom_type)=='Cylindrical'.and.abs(x_face(i))<=64.0d0*epsilon(1.0d0)) then
+              overlap_flux(:,i,j,k)=0.0d0
+            else
+              a=alpha_f_x(i+1,j,k)
+              b=beta_f_x(:,i+1,j,k)
+              g=gamma_f_x(:,:,i+1,j,k)
+              sqg=sqrt_gamma_f_x(i+1,j,k)
+              call resolve_riemann_problem(left(:,i),right(:,i),DIR_X,a,b,g,sqg,overlap_flux(:,i,j,k))
+            end if
+          end do
+        end do
+      end do
+      !$OMP END DO
+      deallocate(strip,left,right)
+      !$OMP END PARALLEL
+    end if
+    overlap_sources_ready=.true.
+  end subroutine prepare_overlap_sources
+  subroutine prepare_overlap_polar_fluxes(p_in)
+    real*8, intent(in) :: p_in(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq)
+    integer :: i,j,k,allocation_status
+    real*8, allocatable :: strip(:,:),left(:,:),right(:,:)
+    real*8 :: a,b(3),g(3,3),sqg
+    overlap_polar_ready=.false.
+    if (ny<6) return
+    if (allocated(overlap_polar_flux)) then
+      if (any(shape(overlap_polar_flux)/=[neq,ny+1,nx,nz])) deallocate(overlap_polar_flux)
+    end if
+    if (.not.allocated(overlap_polar_flux)) then
+      allocate(overlap_polar_flux(neq,0:ny,nx,nz),stat=allocation_status)
+      if (allocation_status/=0) call parallel_abort('polar overlap flux allocation failed')
+    end if
+    !$OMP PARALLEL PRIVATE(i,j,k,strip,left,right,a,b,g,sqg)
+    allocate(strip(neq,-nghost:ny+nghost),left(neq,0:ny),right(neq,0:ny))
+    !$OMP DO COLLAPSE(2)
+    do k=1,nz
+      do i=1,nx
+        do j=1,ny
+          strip(:,j)=p_in(i,j,k,:)
+        end do
+        call reconstruct_1d_core(strip,ny,left,right,DIR_Y,y_global_offset,max(ny,ny_global),3,ny-3)
+        do j=3,ny-3
+          if (is_polar_geometry(geom_type).and.abs(sin(y_face(j)))<=64.0d0*epsilon(1.0d0)) then
+            overlap_polar_flux(:,j,i,k)=0.0d0
+          else
+            a=alpha_f_y(i,j+1,k)
+            b=beta_f_y(:,i,j+1,k)
+            g=gamma_f_y(:,:,i,j+1,k)
+            sqg=sqrt_gamma_f_y(i,j+1,k)
+            call resolve_riemann_problem(left(:,j),right(:,j),DIR_Y,a,b,g,sqg,overlap_polar_flux(:,j,i,k))
+          end if
+        end do
+      end do
+    end do
+    !$OMP END DO
+    deallocate(strip,left,right)
+    !$OMP END PARALLEL
+    overlap_polar_ready=.true.
+  end subroutine prepare_overlap_polar_fluxes
+#endif
 
   subroutine calc_rhs(p_in, rhs_out)
     real*8, intent(in)  :: p_in(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq)
@@ -37,6 +158,10 @@ contains
     else
       call calc_rhs_cpu(p_in,rhs_out)
     end if
+#ifdef GRIAL_OVERLAP
+    overlap_sources_ready=.false.
+    overlap_polar_ready=.false.
+#endif
   end subroutine calc_rhs
 
   ! ===================================================================================
@@ -54,6 +179,9 @@ contains
     integer :: i, j, k
     real*8, allocatable :: prim_1d(:,:), q_L_strip(:,:), q_R_strip(:,:), flux_strip(:,:)
     real*8 :: src_term(neq),source_sum(neq)
+#ifdef GRIAL_PROFILE
+    real*8 :: profile_start
+#endif
 
     ! Variables temporales para pasar la métrica a las interfaces
     real*8 :: a, b(3), g(3,3), sqg
@@ -66,7 +194,12 @@ contains
     ! =====================================================================
     ! 1. BARRIDO EN DIRECCIÓN X (Radial / Horizontal)
     ! =====================================================================
+#ifdef GRIAL_PROFILE
+    !$OMP PARALLEL PRIVATE(profile_start,j,k,i,prim_1d,q_L_strip,q_R_strip,flux_strip,src_term,a,b,g,sqg) &
+    !$OMP& REDUCTION(+:source_sum)
+#else
     !$OMP PARALLEL PRIVATE(j, k, i, prim_1d, q_L_strip, q_R_strip, flux_strip, src_term, a, b, g, sqg) REDUCTION(+:source_sum)
+#endif
 
     ! Alojamiento dinámico de tiras 1D de memoria por cada hilo OMP
     allocate(prim_1d(neq, -nghost:nx+nghost))
@@ -82,12 +215,36 @@ contains
           prim_1d(:,i)=p_in(i,j,k,:)
         end do
 
+#ifdef GRIAL_PROFILE
+          profile_start=profile_clock()
+#endif
         ! B. Reconstrucción Espacial (Devuelve estados en interfaces 0 a nx)
-        call reconstruct_1d_core(prim_1d, nx, q_L_strip, q_R_strip, DIR_X, &
-                                 x_global_offset,max(nx,nx_global))
+#ifdef GRIAL_OVERLAP
+        if (overlap_sources_ready.and.nx>=6) then
+          call reconstruct_1d_core(prim_1d,nx,q_L_strip,q_R_strip,DIR_X, &
+                                   x_global_offset,max(nx,nx_global),0,2)
+          call reconstruct_1d_core(prim_1d,nx,q_L_strip,q_R_strip,DIR_X, &
+                                   x_global_offset,max(nx,nx_global),nx-2,nx)
+        else
+#endif
+          call reconstruct_1d_core(prim_1d, nx, q_L_strip, q_R_strip, DIR_X, &
+                                   x_global_offset,max(nx,nx_global))
+#ifdef GRIAL_OVERLAP
+        end if
+#endif
 
+#ifdef GRIAL_PROFILE
+          call profile_add(7,profile_start)
+          profile_start=profile_clock()
+#endif
         ! C. Cálculo de Flujos en las Interfaces (0 a nx)
         do i = 0, nx
+#ifdef GRIAL_OVERLAP
+          if (overlap_sources_ready.and.nx>=6.and.i>=3.and.i<=nx-3) then
+            flux_strip(:,i)=overlap_flux(:,i,j,k)
+            cycle
+          end if
+#endif
           ! La cara rho=0 del sistema cilíndrico tiene área nula y una métrica
           ! coordenada degenerada. El flujo densitizado se fija exactamente a cero.
           if (trim(geom_type) == 'Cylindrical' .and. &
@@ -105,6 +262,9 @@ contains
           end if
         end do
 
+#ifdef GRIAL_PROFILE
+          call profile_add(8,profile_start)
+#endif
         if (diagnostics_active) call capture_boundary_fluxes(DIR_X,flux_strip(:,0),flux_strip(:,nx))
 
         ! Only one strip exists when the radial budget is enabled (ny=nz=1).
@@ -113,12 +273,26 @@ contains
           radial_mass_flux(2) = flux_strip(eq_de,nx)*dy*dz
         end if
 
+#ifdef GRIAL_PROFILE
+        profile_start=profile_clock()
+#endif
         ! D. Ensamblaje del RHS en los Centros Celulares (1 a nx)
         do i = 1, nx
+#ifdef GRIAL_OVERLAP
+          if (overlap_sources_ready) then
+            src_term=overlap_sources(i,j,k,:)
+          else
+            call calc_sources(p_in(i,j,k,:), src_term, i, j, k)
+          end if
+#else
           call calc_sources(p_in(i,j,k,:), src_term, i, j, k)
+#endif
           if (diagnostics_active) source_sum=source_sum+src_term
           rhs_out(i,j,k,:) = -(flux_strip(:,i) - flux_strip(:,i-1)) / dx + src_term(:)
         end do
+#ifdef GRIAL_PROFILE
+        call profile_add(9,profile_start)
+#endif
       end do
     end do
     !$OMP END DO
@@ -132,7 +306,11 @@ contains
     ! 2. BARRIDO EN DIRECCIÓN Y (Polar / Sagital)
     ! =====================================================================
     if (ny > 1) then
+#ifdef GRIAL_PROFILE
+      !$OMP PARALLEL PRIVATE(profile_start,i,j,k,prim_1d,q_L_strip,q_R_strip,flux_strip,a,b,g,sqg)
+#else
       !$OMP PARALLEL PRIVATE(i, j, k, prim_1d, q_L_strip, q_R_strip, flux_strip, a, b, g, sqg)
+#endif
 
       allocate(prim_1d(neq, -nghost:ny+nghost))
       allocate(q_L_strip(neq, 0:ny))
@@ -147,15 +325,39 @@ contains
             prim_1d(:,j)=p_in(i,j,k,:)
           end do
 
+#ifdef GRIAL_PROFILE
+          profile_start=profile_clock()
+#endif
           ! B. Reconstrucción
-          call reconstruct_1d_core(prim_1d, ny, q_L_strip, q_R_strip, DIR_Y, &
-                                   y_global_offset,max(ny,ny_global))
+#ifdef GRIAL_OVERLAP
+          if (overlap_polar_ready) then
+            call reconstruct_1d_core(prim_1d,ny,q_L_strip,q_R_strip,DIR_Y, &
+                                     y_global_offset,max(ny,ny_global),0,2)
+            call reconstruct_1d_core(prim_1d,ny,q_L_strip,q_R_strip,DIR_Y, &
+                                     y_global_offset,max(ny,ny_global),ny-2,ny)
+          else
+#endif
+            call reconstruct_1d_core(prim_1d, ny, q_L_strip, q_R_strip, DIR_Y, &
+                                     y_global_offset,max(ny,ny_global))
+#ifdef GRIAL_OVERLAP
+          end if
+#endif
 
+#ifdef GRIAL_PROFILE
+          call profile_add(7,profile_start)
+          profile_start=profile_clock()
+#endif
           ! C. Cálculo de Flujos (las interfaces caen en los bordes de celda en theta).
           ! En coordenadas polares las caras theta=0,pi tienen área física nula:
           ! el flujo densitizado sqrt(gamma) F^theta es exactamente cero. No se debe
           ! llamar al solver de Riemann allí porque gamma_ij es degenerada en el eje.
           do j = 0, ny
+#ifdef GRIAL_OVERLAP
+            if (overlap_polar_ready.and.j>=3.and.j<=ny-3) then
+              flux_strip(:,j)=overlap_polar_flux(:,j,i,k)
+              cycle
+            end if
+#endif
             if (is_polar_geometry(geom_type) .and. &
                 abs(sin(y_face(j))) <= 64.0d0*epsilon(1.0d0)) then
               flux_strip(:,j) = 0.0d0
@@ -170,6 +372,9 @@ contains
             end if
           end do
 
+#ifdef GRIAL_PROFILE
+          call profile_add(8,profile_start)
+#endif
           if (diagnostics_active) call capture_boundary_fluxes(DIR_Y,flux_strip(:,0),flux_strip(:,ny))
 
           ! D. Acumulación de Flujos Y en el RHS
@@ -189,7 +394,11 @@ contains
     ! 3. BARRIDO EN DIRECCIÓN Z (Azimutal / Vertical)
     ! =====================================================================
     if (nz > 1) then
+#ifdef GRIAL_PROFILE
+      !$OMP PARALLEL PRIVATE(profile_start,i,j,k,prim_1d,q_L_strip,q_R_strip,flux_strip,a,b,g,sqg)
+#else
       !$OMP PARALLEL PRIVATE(i, j, k, prim_1d, q_L_strip, q_R_strip, flux_strip, a, b, g, sqg)
+#endif
 
       allocate(prim_1d(neq, -nghost:nz+nghost))
       allocate(q_L_strip(neq, 0:nz))
@@ -204,9 +413,16 @@ contains
             prim_1d(:,k)=p_in(i,j,k,:)
           end do
 
+#ifdef GRIAL_PROFILE
+          profile_start=profile_clock()
+#endif
           ! B. Reconstrucción
           call reconstruct_1d_core(prim_1d, nz, q_L_strip, q_R_strip, DIR_Z)
 
+#ifdef GRIAL_PROFILE
+          call profile_add(7,profile_start)
+          profile_start=profile_clock()
+#endif
           ! C. Cálculo de Flujos
           do k = 0, nz
             a    = alpha_f_z(i, j, k+1)
@@ -217,6 +433,9 @@ contains
             call resolve_riemann_problem(q_L_strip(:,k), q_R_strip(:,k), DIR_Z, a, b, g, sqg, flux_strip(:,k))
           end do
 
+#ifdef GRIAL_PROFILE
+          call profile_add(8,profile_start)
+#endif
           if (diagnostics_active) call capture_boundary_fluxes(DIR_Z,flux_strip(:,0),flux_strip(:,nz))
 
           ! D. Acumulación de Flujos Z en el RHS
@@ -511,6 +730,29 @@ contains
     integer :: i, j, k, invalid_cfl_cells
     logical :: active_y,active_z,cache_ok
 
+#ifdef GRIAL_CFL_CACHE
+    integer :: cache_layout(8)
+    real*8 :: cache_parameters(4)
+    logical :: refresh_cache
+    cache_layout=[nx,ny,nz,nx_global,ny_global,nz_global,x_global_offset,y_global_offset]
+    cache_parameters=[dx,dy,dz,CFL]
+    cache_ok=allocated(alpha_c).and.allocated(beta_c).and.allocated(gamma_inv_c)
+    if (cache_ok) cache_ok=all(shape(alpha_c)==[nx,ny,nz]).and. &
+      all(shape(beta_c)==[3,nx,ny,nz]).and.all(shape(gamma_inv_c)==[3,3,nx,ny,nz])
+    refresh_cache=.true.
+    if (all(ieee_is_finite(cache_parameters))) then
+      refresh_cache=.not.cache_ok.or..not.causal_cache_ready.or.metric_cache_generation/=causal_cache_generation.or. &
+        any(cache_layout/=causal_cache_layout).or.any(cache_parameters/=causal_cache_parameters)
+    end if
+    ! Even a change on one rank must invalidate the global maxima everywhere.
+    ! This one collective remains on every call; all dynamic safety agreements
+    ! in timing/integration remain unchanged.
+    if (parallel_size>1) refresh_cache=any_time_request(refresh_cache)
+    if (.not.refresh_cache) then
+      dt=causal_cache_dt
+      return
+    end if
+#endif
     max_vx = 0.0d0
     max_vy = 0.0d0
     max_vz = 0.0d0
@@ -594,6 +836,13 @@ contains
     ! Reduce each directional maximum before the serial x+y+z propagation sum.
     dt=cfl_step_from_maxima(global_maxima,[dx,dy,dz],[.true.,active_y,active_z],CFL)
 
+#ifdef GRIAL_CFL_CACHE
+    causal_cache_layout=cache_layout
+    causal_cache_parameters=cache_parameters
+    causal_cache_generation=metric_cache_generation
+    causal_cache_dt=dt
+    causal_cache_ready=.true.
+#endif
   end subroutine update_adaptive_dt
 
 end module evolution

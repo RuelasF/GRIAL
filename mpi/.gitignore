@@ -54,3 +54,8 @@ analysis/mpi_shock_profiles
 *.pvd
 
 /native/
+
+# Executables for optional MPI builds
+/grial_mpi_overlap*
+/grial_mpi_profile*
+/grial_mpi_cfl_cache

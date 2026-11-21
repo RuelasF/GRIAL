@@ -95,7 +95,16 @@ contains
       call MPI_Reduce(values,received,size(values),MPI_DOUBLE_PRECISION,op,0,MPI_COMM_WORLD,status)
       if (parallel_rank==0) values=received
     else
+#ifdef GRIAL_PROFILE
+      block
+        real*8 :: collective_start
+        collective_start=profile_clock()
+#endif
       call MPI_Allreduce(MPI_IN_PLACE,values,size(values),MPI_DOUBLE_PRECISION,op,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+        call profile_label_add('parallel_diagnostics:reduce_real:1',collective_start)
+      end block
+#endif
     end if
     call parallel_check_mpi(status,'global diagnostic real reduction')
 #endif
@@ -116,7 +125,16 @@ contains
         call MPI_Reduce(values,received,size(values),count_type,MPI_SUM,0,MPI_COMM_WORLD,status)
         if (parallel_rank==0) values=received
       else
+#ifdef GRIAL_PROFILE
+        block
+          real*8 :: collective_start
+          collective_start=profile_clock()
+#endif
         call MPI_Allreduce(MPI_IN_PLACE,values,size(values),count_type,MPI_SUM,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+          call profile_label_add('parallel_diagnostics:reduce_counts:2',collective_start)
+        end block
+#endif
       end if
       call parallel_check_mpi(status,'global diagnostic int64 reduction')
     end if
@@ -275,9 +293,27 @@ contains
       signature(8+i)=iachar(labels(i:i))
     end do
 #ifdef USE_MPI
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(signature,minimum,size(signature),MPI_INTEGER,MPI_MIN,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_diagnostics:initialize_parallel_diagnostics:3',collective_start)
+    end block
+#endif
     call parallel_check_mpi(status,'diagnostic configuration minimum')
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(signature,maximum,size(signature),MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_diagnostics:initialize_parallel_diagnostics:4',collective_start)
+    end block
+#endif
     call parallel_check_mpi(status,'diagnostic configuration maximum')
     call parallel_require_collective(all(minimum==maximum),'inconsistent diagnostic configuration')
     call MPI_Type_match_size(MPI_TYPECLASS_INTEGER,storage_size(0_int64)/8,count_type,status)

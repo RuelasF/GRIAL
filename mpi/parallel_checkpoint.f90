@@ -122,7 +122,16 @@ contains
     logical, intent(in) :: local_ok
 #ifdef USE_MPI
     integer :: status
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(local_ok,ok,1,MPI_LOGICAL,MPI_LAND,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_checkpoint:io_agreement:1',collective_start)
+    end block
+#endif
     call parallel_check_mpi(status,'checkpoint IO agreement')
 #else
     ok=local_ok
@@ -147,9 +156,27 @@ contains
 #ifdef USE_MPI
     integer(int64) :: minimum(size(values)),maximum(size(values))
     integer :: status
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(values,minimum,size(values),count_type,MPI_MIN,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_checkpoint:agree_values:2',collective_start)
+    end block
+#endif
     call parallel_check_mpi(status,'checkpoint controls minimum')
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(values,maximum,size(values),count_type,MPI_MAX,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_checkpoint:agree_values:3',collective_start)
+    end block
+#endif
     call parallel_check_mpi(status,'checkpoint controls maximum')
     call parallel_require_collective(all(minimum==maximum),message)
 #endif

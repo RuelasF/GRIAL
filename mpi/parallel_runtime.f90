@@ -2,7 +2,7 @@
 module parallel_runtime
   use, intrinsic :: iso_fortran_env, only: error_unit
 #ifdef _OPENMP
-  use omp_lib, only: omp_in_parallel
+  use omp_lib, only: omp_in_parallel, omp_get_wtime
 #endif
 #ifdef USE_MPI
   use mpi_f08
@@ -18,10 +18,68 @@ module parallel_runtime
 #else
   logical, parameter :: parallel_enabled = .false.
 #endif
+#ifdef GRIAL_PROFILE
+  public :: profile_reset, profile_add, profile_report, profile_clock, profile_label_add
+  real*8 :: profile_seconds(9)=0.0d0
+  integer :: profile_calls(9)=0
+  character(len=160) :: profile_labels(256)=""
+  real*8 :: profile_label_seconds(256)=0.0d0
+  integer :: profile_label_calls(256)=0
+#endif
   integer, protected :: parallel_rank=0, parallel_size=1, parallel_thread_level=0
   logical :: active=.false.
 
 contains
+
+#ifdef GRIAL_PROFILE
+  real*8 function profile_clock()
+    profile_clock=omp_get_wtime()
+  end function profile_clock
+
+  subroutine profile_reset()
+    profile_seconds=0.0d0; profile_calls=0
+    profile_labels=""; profile_label_seconds=0.0d0; profile_label_calls=0
+  end subroutine profile_reset
+
+  subroutine profile_add(slot,start)
+    integer, intent(in) :: slot
+    real*8, intent(in) :: start
+    !$omp atomic update
+    profile_seconds(slot)=profile_seconds(slot)+profile_clock()-start
+    !$omp atomic update
+    profile_calls(slot)=profile_calls(slot)+1
+  end subroutine profile_add
+
+  subroutine profile_label_add(label,start)
+    character(len=*), intent(in) :: label
+    real*8, intent(in) :: start
+    integer :: i
+    do i=1,size(profile_labels)
+      if (profile_labels(i)==label.or.profile_labels(i)=="") then
+        profile_labels(i)=label
+        profile_label_seconds(i)=profile_label_seconds(i)+profile_clock()-start
+        profile_label_calls(i)=profile_label_calls(i)+1
+        return
+      end if
+    end do
+    error stop "too many profiling labels"
+  end subroutine profile_label_add
+
+  subroutine profile_report()
+    integer :: i
+    character(len=16),parameter :: names(9)=[character(len=16) :: 'cfl','rhs','recovery','halos', &
+      'observer','validate_mpi','reconstruct','riemann_loop','source_assembly']
+    do i=1,9
+      write(*,'(A,I0,1X,A,1X,I0,1X,ES24.16E3)') 'GRIAL_PROFILE rank=',parallel_rank, &
+        trim(names(i)),profile_calls(i),profile_seconds(i)
+    end do
+    do i=1,size(profile_labels)
+      if (profile_label_calls(i)==0) cycle
+      write(*,'(A,I0,1X,A,1X,I0,1X,ES24.16E3)') "GRIAL_PROFILE_COLLECTIVE rank=",parallel_rank, &
+        trim(profile_labels(i)),profile_label_calls(i),profile_label_seconds(i)
+    end do
+  end subroutine profile_report
+#endif
 
   subroutine require_main_thread()
     ! FUNNELED calls remain outside OpenMP regions, including the primary thread.
@@ -90,13 +148,23 @@ contains
     logical, intent(in) :: local_ok
     character(len=*), intent(in) :: message
     logical :: all_ok
+#ifdef GRIAL_PROFILE
+    real*8 :: profile_start
+#endif
 #ifdef USE_MPI
     integer :: status
 #endif
     call require_main_thread()
     if (.not.active) call parallel_abort('parallel runtime is not active')
 #ifdef USE_MPI
+#ifdef GRIAL_PROFILE
+    profile_start=profile_clock()
+#endif
     call MPI_Allreduce(local_ok,all_ok,1,MPI_LOGICAL,MPI_LAND,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+    call profile_add(6,profile_start)
+    call profile_label_add(message,profile_start)
+#endif
     call parallel_check_mpi(status,'MPI_Allreduce validation')
 #else
     all_ok=local_ok

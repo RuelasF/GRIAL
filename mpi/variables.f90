@@ -22,6 +22,8 @@ module variables
     ! ==========================================================
     ! ÍNDICES DE ECUACIONES (Vectores de Estado)
     ! ==========================================================
+    ! Increment whenever the stationary cell geometry is rebuilt. Not checkpointed.
+    integer(int64) :: metric_cache_generation=0_int64
     integer, parameter :: neq = 5
 
     integer, parameter :: eq_de = 1 ! D:  Densidad de masa en reposo conservada (rho * W * sqrt(gamma))

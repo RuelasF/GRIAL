@@ -49,9 +49,27 @@ contains
     call parallel_require_collective(valid,'invalid perturbation controls')
     minimum=values;maximum=values
 #ifdef USE_MPI
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(values,minimum,size(values),MPI_DOUBLE_PRECISION,MPI_MIN,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_perturbations:agree_controls:1',collective_start)
+    end block
+#endif
     call parallel_check_mpi(status,'perturbation metadata minimum')
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(values,maximum,size(values),MPI_DOUBLE_PRECISION,MPI_MAX,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_perturbations:agree_controls:2',collective_start)
+    end block
+#endif
     call parallel_check_mpi(status,'perturbation metadata maximum')
 #endif
     call parallel_require_collective(all(minimum==maximum),'perturbation controls differ between ranks')

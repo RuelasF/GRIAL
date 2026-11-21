@@ -303,7 +303,7 @@ module variables
     real*8 :: checkpoint_interval = 100.0d0
     real*8 :: next_checkpoint
     logical :: do_restart = .false.
-    character(len=100) :: restart_file = 'FishboneMoncrief_Equatorial_test/checkpoint_weno5_hlle_08800.rst'
+    character(len=1024) :: restart_file = 'FishboneMoncrief_Equatorial_test/checkpoint_weno5_hlle_08800.rst'
 
     ! Símbolos de módulo visibles desde rutinas `!$acc routine`. La memoria
     ! real se crea y puebla después de conocer la malla, en accelerator.f90.

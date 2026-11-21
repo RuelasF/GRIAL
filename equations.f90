@@ -392,7 +392,7 @@ contains
     integer, parameter :: MAX_ITER = 100
     real*8, parameter :: EPS = 3.0d-8
     integer :: iter, ii, jj
-    real*8 :: a, b, c, d = 0.0d0, e = 0.0d0, fa, fb, fc, o, q, r, y1, tol1, xm, df
+    real*8 :: a, b, c, d, e, fa, fb, fc, o, q, r, y1, tol1, xm, df
 
     ! Variables para la cota dinámica superior
     real*8 :: S_sq_local, W_max_guess, ginv_local(3,3)
@@ -418,6 +418,7 @@ contains
     end if
 
     a = x1; b = x2; c = b; fc = fb
+    d = 0.0d0; e = 0.0d0
 
     do iter = 1, MAX_ITER
       if (sign(1.0d0, fb) * sign(1.0d0, fc) > 0.0d0) then

@@ -81,7 +81,16 @@ contains
       transfer(calendar%next_checkpoint,0_int64),calendar%save_index, &
       int(calendar%diagnostic_step,int64),int(calendar%observable_step,int64)]
 #ifdef USE_MPI
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Bcast(root_path,len(root_path),MPI_CHARACTER,0,MPI_COMM_WORLD,ios)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_observer:agree_call_path:84',collective_start)
+    end block
+#endif
     call parallel_check_mpi(ios,'observer path agreement')
     call MPI_Type_match_size(MPI_TYPECLASS_INTEGER,storage_size(0_int64)/8,count_type,ios)
     call parallel_check_mpi(ios,'observer integer datatype')

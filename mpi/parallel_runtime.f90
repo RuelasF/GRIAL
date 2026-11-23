@@ -1,6 +1,6 @@
 ! Optional MPI lifecycle. No domain decomposition or hydrodynamic communication yet.
 module parallel_runtime
-  use, intrinsic :: iso_fortran_env, only: error_unit
+  use, intrinsic :: iso_fortran_env, only: error_unit, int64
 #ifdef _OPENMP
   use omp_lib, only: omp_in_parallel, omp_get_wtime
 #endif
@@ -25,6 +25,13 @@ module parallel_runtime
   character(len=160) :: profile_labels(256)=""
   real*8 :: profile_label_seconds(256)=0.0d0
   integer :: profile_label_calls(256)=0
+  ! Records are buffered outside the timed MPI call. All ranks on one host
+  ! share the monotonic clock used by GNU Fortran's int64 SYSTEM_CLOCK.
+  integer, parameter :: trace_capacity=131072
+  integer, allocatable :: trace_site(:)
+  real*8, allocatable :: trace_enter(:),trace_leave(:)
+  integer :: trace_count=0
+  logical :: trace_truncated=.false.
 #endif
   integer, protected :: parallel_rank=0, parallel_size=1, parallel_thread_level=0
   logical :: active=.false.
@@ -33,12 +40,22 @@ contains
 
 #ifdef GRIAL_PROFILE
   real*8 function profile_clock()
-    profile_clock=omp_get_wtime()
+    integer(int64) :: ticks,rate
+    call system_clock(ticks,rate)
+    profile_clock=dble(ticks)/dble(rate)
   end function profile_clock
 
   subroutine profile_reset()
+    character(len=8) :: setting
+    integer :: status
+
     profile_seconds=0.0d0; profile_calls=0
     profile_labels=""; profile_label_seconds=0.0d0; profile_label_calls=0
+    trace_count=0;trace_truncated=.false.
+    call get_environment_variable('GRIAL_COLLECTIVE_TRACE',setting,status=status)
+    if (allocated(trace_site)) deallocate(trace_site,trace_enter,trace_leave)
+    if (status==0.and.setting=='1') allocate(trace_site(trace_capacity), &
+      trace_enter(trace_capacity),trace_leave(trace_capacity))
   end subroutine profile_reset
 
   subroutine profile_add(slot,start)
@@ -54,10 +71,23 @@ contains
     character(len=*), intent(in) :: label
     real*8, intent(in) :: start
     integer :: i
+    real*8 :: finished
+
+    finished=profile_clock()
     do i=1,size(profile_labels)
       if (profile_labels(i)==label.or.profile_labels(i)=="") then
         profile_labels(i)=label
-        profile_label_seconds(i)=profile_label_seconds(i)+profile_clock()-start
+        profile_label_seconds(i)=profile_label_seconds(i)+(finished-start)
+        if (allocated(trace_site)) then
+          if (trace_count<size(trace_site)) then
+            trace_count=trace_count+1
+            trace_site(trace_count)=i
+            trace_enter(trace_count)=start
+            trace_leave(trace_count)=finished
+          else
+            trace_truncated=.true.
+          end if
+        end if
         profile_label_calls(i)=profile_label_calls(i)+1
         return
       end if
@@ -66,7 +96,8 @@ contains
   end subroutine profile_label_add
 
   subroutine profile_report()
-    integer :: i
+    integer :: i,unit,ios
+    character(len=48) :: trace_path
     character(len=16),parameter :: names(9)=[character(len=16) :: 'cfl','rhs','recovery','halos', &
       'observer','validate_mpi','reconstruct','riemann_loop','source_assembly']
     do i=1,9
@@ -78,6 +109,17 @@ contains
       write(*,'(A,I0,1X,A,1X,I0,1X,ES24.16E3)') "GRIAL_PROFILE_COLLECTIVE rank=",parallel_rank, &
         trim(profile_labels(i)),profile_label_calls(i),profile_label_seconds(i)
     end do
+    if (allocated(trace_site)) then
+      write(trace_path,'(A,I0,A)') 'grial_collectives_rank_',parallel_rank,'.tsv'
+      open(newunit=unit,file=trim(trace_path),status='new',action='write',iostat=ios)
+      if (ios/=0) call parallel_abort('cannot write collective profile '//trim(trace_path))
+      write(unit,'(A,L1)') '# truncated=',trace_truncated
+      do i=1,trace_count
+        write(unit,'(I0,A,ES24.16E3,A,ES24.16E3,2A)') i,achar(9),trace_enter(i),achar(9), &
+          trace_leave(i),achar(9),trim(profile_labels(trace_site(i)))
+      end do
+      close(unit)
+    end if
   end subroutine profile_report
 #endif
 
@@ -162,8 +204,8 @@ contains
 #endif
     call MPI_Allreduce(local_ok,all_ok,1,MPI_LOGICAL,MPI_LAND,MPI_COMM_WORLD,status)
 #ifdef GRIAL_PROFILE
-    call profile_add(6,profile_start)
     call profile_label_add(message,profile_start)
+    call profile_add(6,profile_start)
 #endif
     call parallel_check_mpi(status,'MPI_Allreduce validation')
 #else

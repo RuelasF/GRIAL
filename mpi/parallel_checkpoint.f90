@@ -213,7 +213,16 @@ contains
 #ifdef USE_MPI
     call MPI_Type_match_size(MPI_TYPECLASS_INTEGER,storage_size(0_int64)/8,count_type,status)
     call parallel_check_mpi(status,'checkpoint int64 MPI datatype')
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Bcast(root_path,len(root_path),MPI_CHARACTER,0,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_checkpoint:agree_path:216',collective_start)
+    end block
+#endif
     call parallel_check_mpi(status,'checkpoint path agreement')
 #endif
     call parallel_require_collective(path==root_path,'checkpoint path differs between ranks')
@@ -254,7 +263,16 @@ contains
 #ifdef USE_MPI
     call MPI_Type_match_size(MPI_TYPECLASS_INTEGER,storage_size(0_int64)/8,count_type,status)
     call parallel_check_mpi(status,'checkpoint int64 MPI datatype')
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Bcast(root_path,len(root_path),MPI_CHARACTER,0,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_checkpoint:agree_path:257',collective_start)
+    end block
+#endif
     call parallel_check_mpi(status,'checkpoint path agreement')
 #endif
     call parallel_require_collective(path==root_path,'checkpoint path differs between ranks')
@@ -913,7 +931,16 @@ contains
       status=1;return
     end if
 #ifdef USE_MPI
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Bcast(signature,2,count_type,0,MPI_COMM_WORLD,mpi_result)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_checkpoint:restore_history_signature:916',collective_start)
+    end block
+#endif
     call parallel_check_mpi(mpi_result,'serial checkpoint signature')
 #endif
   end subroutine root_file_signature

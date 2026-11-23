@@ -111,6 +111,9 @@ contains
     integer(int64) :: expected_size,actual_size
     real*8 :: started,budget,margin,max_step,checkpoint_cost,last_checkpoint_wall,step_started,before
     real*8 :: requested_budget,requested_margin,setup_seconds
+#ifdef GRIAL_PROFILE
+    real*8 :: loop_started
+#endif
     logical :: resume,check_only,injected,stop_requested,checkpoint_requested,exists
     logical :: grid_seen,budget_seen,margin_seen
 
@@ -240,6 +243,9 @@ contains
     start_step=n_steps;max_step=0.0d0;checkpoint_cost=0.0d0
     last_checkpoint_wall=wall_time_seconds();setup_seconds=last_checkpoint_wall-started
     reason='running';call publish_status()
+#ifdef GRIAL_PROFILE
+    loop_started=profile_clock()
+#endif
     do while(integration_time<final_time)
       stop_requested=.false.
       if(budget>0.0d0)stop_requested=wall_time_seconds()-started+max_step>=budget-margin-checkpoint_cost
@@ -289,6 +295,7 @@ contains
       max_step=max(max_step,wall_time_seconds()-step_started)
     end do
 #ifdef GRIAL_PROFILE
+    write(*,'(A,I0,1X,ES24.16E3)') 'GRIAL_LOOP rank=',parallel_rank,profile_clock()-loop_started
     call profile_report()
 #endif
     call sample_parallel_observer(calendar,.true.);call vtk_now();call checkpoint_now()

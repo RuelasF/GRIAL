@@ -66,7 +66,7 @@ contains
     real*8 :: minimum(1),maximum(1)
     call parallel_require_active()
     minimum=merge(1.0d0,0.0d0,diagnostics_active);maximum=minimum
-    call reduce_real(minimum,OP_MIN);call reduce_real(maximum,OP_MAX)
+    call reduce_real(minimum,OP_MIN,'validate_checkpoint_boundary:minimum:OP_MIN');call reduce_real(maximum,OP_MAX,'validate_checkpoint_boundary:maximum:OP_MAX')
     call parallel_require_collective(all(minimum==maximum),'checkpoint diagnostic activation differs between ranks')
     if (diagnostics_active) then
       call validate_context();call agree_epoch()
@@ -74,9 +74,10 @@ contains
     end if
   end subroutine validate_checkpoint_boundary
 
-  subroutine reduce_real(values,operation,root_only)
+  subroutine reduce_real(values,operation,site,root_only)
     real*8, intent(inout) :: values(:)
     integer, intent(in) :: operation
+    character(len=*), intent(in) :: site
     logical, intent(in), optional :: root_only
     logical :: to_root
     real*8 :: received(size(values))
@@ -92,7 +93,16 @@ contains
     case(OP_MAX);op=MPI_MAX
     end select
     if (to_root) then
+#ifdef GRIAL_PROFILE
+      block
+        real*8 :: collective_start
+        collective_start=profile_clock()
+#endif
       call MPI_Reduce(values,received,size(values),MPI_DOUBLE_PRECISION,op,0,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+        call profile_label_add(site,collective_start)
+      end block
+#endif
       if (parallel_rank==0) values=received
     else
 #ifdef GRIAL_PROFILE
@@ -102,7 +112,7 @@ contains
 #endif
       call MPI_Allreduce(MPI_IN_PLACE,values,size(values),MPI_DOUBLE_PRECISION,op,MPI_COMM_WORLD,status)
 #ifdef GRIAL_PROFILE
-        call profile_label_add('parallel_diagnostics:reduce_real:1',collective_start)
+        call profile_label_add(site,collective_start)
       end block
 #endif
     end if
@@ -122,7 +132,16 @@ contains
 #ifdef USE_MPI
     if (parallel_size>1) then
       if (root_only) then
+#ifdef GRIAL_PROFILE
+        block
+          real*8 :: collective_start
+          collective_start=profile_clock()
+#endif
         call MPI_Reduce(values,received,size(values),count_type,MPI_SUM,0,MPI_COMM_WORLD,status)
+#ifdef GRIAL_PROFILE
+          call profile_label_add('parallel_diagnostics:reduce_counts_root:125',collective_start)
+        end block
+#endif
         if (parallel_rank==0) values=received
       else
 #ifdef GRIAL_PROFILE
@@ -147,7 +166,7 @@ contains
     to_root=.false.
     if (present(root_only)) to_root=root_only
     lower=merge(1.0d0,0.0d0,to_root);upper=lower
-    call reduce_real(lower,OP_MIN);call reduce_real(upper,OP_MAX)
+    call reduce_real(lower,OP_MIN,'reduce_counts:lower:OP_MIN');call reduce_real(upper,OP_MAX,'reduce_counts:upper:OP_MAX')
     call parallel_require_collective(all(lower==upper),'diagnostic reduction destination differs between ranks')
   end function root_destination
 
@@ -155,7 +174,7 @@ contains
     real*8, intent(inout) :: values(:)
     call parallel_require_active()
     call parallel_require_collective(all(ieee_is_finite(values)),'nonfinite local observable contribution')
-    call reduce_real(values,OP_SUM,.true.)
+    call reduce_real(values,OP_SUM,'reduce_observable_sum:values:OP_SUM',.true.)
     call parallel_require_collective(parallel_rank/=0.or.all(ieee_is_finite(values)), &
       'nonfinite global observable sum')
   end subroutine reduce_observable_sum
@@ -172,7 +191,7 @@ contains
     lower=[merge(1.0d0,0.0d0,do_ppi_diagnostics),merge(1.0d0,0.0d0,do_gw_extraction), &
       merge(1.0d0,0.0d0,do_mdot_extraction),bh_mass,a_spin,merge(1.0d0,0.0d0,use_log_r), &
       dble(idx_probe_global),dble(PPI_MAX_MODE),0.0d0];upper=lower
-    call reduce_real(lower,OP_MIN);call reduce_real(upper,OP_MAX)
+    call reduce_real(lower,OP_MIN,'validate_observable_sample:lower:OP_MIN');call reduce_real(upper,OP_MAX,'validate_observable_sample:upper:OP_MAX')
     call parallel_require_collective(all(lower==upper),'observable controls differ between ranks')
     valid=all(ieee_is_finite(p(1:nx,1:ny,1:nz,:))).and.all(ieee_is_finite(up)).and. &
       all(ieee_is_finite(alpha_c)).and.all(ieee_is_finite(beta_c))
@@ -218,7 +237,7 @@ contains
     if (valid) valid=integration_time>=0.0d0.and.n_steps>=0
     call parallel_require_collective(valid,'invalid diagnostic time epoch')
     lower=[integration_time,dble(n_steps),dble(budget_steps)];upper=lower
-    call reduce_real(lower,OP_MIN);call reduce_real(upper,OP_MAX)
+    call reduce_real(lower,OP_MIN,'agree_epoch:lower:OP_MIN');call reduce_real(upper,OP_MAX,'agree_epoch:upper:OP_MAX')
     if (any(lower/=upper)) call parallel_abort('inconsistent diagnostic time epoch')
   end subroutine agree_epoch
 
@@ -271,7 +290,7 @@ contains
     if (valid) valid=all(metadata>0.0d0)
     call parallel_require_collective(valid,'invalid diagnostic spacing or atmosphere floors')
     lower=metadata;upper=metadata
-    call reduce_real(lower,OP_MIN);call reduce_real(upper,OP_MAX)
+    call reduce_real(lower,OP_MIN,'initialize_parallel_diagnostics:lower:OP_MIN');call reduce_real(upper,OP_MAX,'initialize_parallel_diagnostics:upper:OP_MAX')
     if (any(lower/=upper)) call parallel_abort('inconsistent diagnostic spacing or floors')
     supported=.true.;periodic=[.false.,.true.,.true.]
     select case(trim(case_name))
@@ -496,7 +515,7 @@ contains
     packet(8*neq+1:9*neq)=source_total
     packet(9*neq+1:10*neq)=repair_total
     packet(10*neq+1:11*neq)=perturbation_total
-    call reduce_real(packet,OP_SUM,to_root)
+    call reduce_real(packet,OP_SUM,'collect_conservation_balance:packet:OP_SUM',to_root)
     if (to_root.and.parallel_rank/=0) return
     balance%initial=packet(1:neq);balance%current=packet(neq+1:2*neq)
     balance%flux=reshape(packet(2*neq+1:8*neq),[neq,2,3])
@@ -550,9 +569,9 @@ contains
         end do
       end do
     end do
-    call reduce_real(sums,OP_SUM,to_root);call reduce_real(minimum,OP_MIN,to_root)
+    call reduce_real(sums,OP_SUM,'collect_global_state:sums:OP_SUM',to_root);call reduce_real(minimum,OP_MIN,'collect_global_state:minimum:OP_MIN',to_root)
     ! Every rank needs this scale before forming its local L2 sum.
-    call reduce_real(maximum,OP_MAX)
+    call reduce_real(maximum,OP_MAX,'collect_global_state:maximum:OP_MAX')
     call reduce_counts(counts,to_root)
     call parallel_require_collective((to_root.and.parallel_rank/=0).or.counts(NUM_EVENT_COUNT+1)==global_cells, &
       'incomplete diagnostic cell coverage')
@@ -560,7 +579,7 @@ contains
     do m=1,neq
       if (maximum(3+m)>0.0d0) squares(m)=sum((up(:,:,:,m)/maximum(3+m))**2)
     end do
-    call reduce_real(squares,OP_SUM,to_root)
+    call reduce_real(squares,OP_SUM,'collect_global_state:squares:OP_SUM',to_root)
     extra_work=extra_face_work()
     if (to_root.and.parallel_rank/=0) return
     state%totals=sums(1:neq);state%l1=sums(neq+1:2*neq)/dble(global_cells)
@@ -587,13 +606,13 @@ contains
     do m=1,neq
       linf(m)=maxval(abs(up(:,:,:,m)-reference(:,:,:,m)))
     end do
-    call reduce_real(linf,OP_MAX)
+    call reduce_real(linf,OP_MAX,'conserved_error_norms:linf:OP_MAX')
     sums=0.0d0
     do m=1,neq
       sums(m)=sum(abs(up(:,:,:,m)-reference(:,:,:,m)))
       if (linf(m)>0.0d0) sums(neq+m)=sum(((up(:,:,:,m)-reference(:,:,:,m))/linf(m))**2)
     end do
-    call reduce_real(sums,OP_SUM)
+    call reduce_real(sums,OP_SUM,'conserved_error_norms:sums:OP_SUM')
     l1=sums(1:neq)/dble(global_cells);l2=linf*sqrt(sums(neq+1:2*neq)/dble(global_cells))
   end subroutine conserved_error_norms
 

@@ -33,7 +33,16 @@ contains
       real*8 :: collective_start
       collective_start=profile_clock()
 #endif
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Allreduce(MPI_IN_PLACE,status,1,MPI_INTEGER,MPI_MAX,MPI_COMM_WORLD,rc)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_visualization:publish_status:36',collective_start)
+    end block
+#endif
 #ifdef GRIAL_PROFILE
       call profile_label_add('parallel_visualization:agree_status:1',collective_start)
     end block
@@ -69,11 +78,38 @@ contains
     root_path=path
     root_geometry=geom_type;root_metric=metric_type
 #ifdef USE_MPI
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Bcast(root_path,len(root_path),MPI_CHARACTER,0,MPI_COMM_WORLD,rc)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_visualization:agree_frame_path:72',collective_start)
+    end block
+#endif
     call parallel_check_mpi(rc,'VTK path agreement')
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Bcast(root_geometry,len(root_geometry),MPI_CHARACTER,0,MPI_COMM_WORLD,rc)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_visualization:agree_frame_geometry:74',collective_start)
+    end block
+#endif
     call parallel_check_mpi(rc,'VTK geometry agreement')
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Bcast(root_metric,len(root_metric),MPI_CHARACTER,0,MPI_COMM_WORLD,rc)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_visualization:agree_frame_metric:76',collective_start)
+    end block
+#endif
     call parallel_check_mpi(rc,'VTK metric agreement')
 #endif
     call parallel_require_collective(path==root_path,'VTK path differs between ranks')
@@ -108,7 +144,16 @@ contains
 #ifdef USE_MPI
     call MPI_Type_match_size(MPI_TYPECLASS_INTEGER,storage_size(0_int64)/8,count_type,rc)
     call parallel_check_mpi(rc,'VTK int64 type')
+#ifdef GRIAL_PROFILE
+    block
+      real*8 :: collective_start
+      collective_start=profile_clock()
+#endif
     call MPI_Bcast(root_values,size(values),count_type,0,MPI_COMM_WORLD,rc)
+#ifdef GRIAL_PROFILE
+      call profile_label_add('parallel_visualization:agree_frame_controls:111',collective_start)
+    end block
+#endif
     call parallel_check_mpi(rc,'VTK epoch agreement')
 #endif
     call parallel_require_collective(all(values==root_values),'VTK epoch or configuration differs between ranks')

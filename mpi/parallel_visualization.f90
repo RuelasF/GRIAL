@@ -5,6 +5,7 @@ module parallel_visualization
   use domain_decomposition, only: domain_layout,validate_domain
   use parallel_diagnostics, only: validate_checkpoint_boundary
   use output, only: vtk_polar_position
+  use metrics, only: polar_angle,polar_jacobian
   use, intrinsic :: iso_fortran_env, only: int8
   use, intrinsic :: iso_c_binding, only: c_char,c_int,c_null_char
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
@@ -64,7 +65,7 @@ contains
     character(len=len(geom_type))::root_geometry
     character(len=len(metric_type))::root_metric
     character(len=160)::message
-    integer(int64)::values(26),root_values(26)
+    integer(int64)::values(27),root_values(27)
     logical::valid
 #ifdef USE_MPI
     integer::rc
@@ -139,7 +140,7 @@ contains
       transfer(z_min,0_int64),transfer(z_max,0_int64), &
       int(iachar(geom_type(1:1)),int64),int(iachar(metric_type(1:1)),int64), &
       int(nghost,int64),int(neq,int64),int(case_id,int64), &
-      transfer(dx,0_int64),transfer(dy,0_int64),transfer(dz,0_int64),int(parallel_size,int64)]
+      transfer(dx,0_int64),transfer(dy,0_int64),transfer(dz,0_int64),int(parallel_size,int64),transfer(polar_mesh_h,0_int64)]
     root_values=values
 #ifdef USE_MPI
     call MPI_Type_match_size(MPI_TYPECLASS_INTEGER,storage_size(0_int64)/8,count_type,rc)
@@ -205,6 +206,7 @@ contains
       do j=0,jp
         theta=y(1)
         if(jp>0)theta=y_face(j)
+        if(polar)theta=polar_angle(theta)
         do i=0,nx
           if(closed_phi.and.k==kp)then
             ids(i,j,k)=ids(i,j,0);cycle
@@ -305,6 +307,9 @@ contains
     write(line,'(I0)')vtk_mapping_id;call metadata('Int64','MappingId',trim(line))
     write(line,'(I0)')merge(1,0,use_log_r);call metadata('Int64','LogRadius',trim(line))
     write(line,'(ES24.16E3)')a_spin;call metadata('Float64','Spin',trim(line))
+    if(polar_mesh_h/=1.0d0)then
+      write(line,'(ES24.16E3)')polar_mesh_h;call metadata('Float64','PolarMeshH',trim(line))
+    end if
     call xml('</FieldData>')
     write(line,'(A,I0,A,I0,A)')'<Piece NumberOfPoints="',size(points,2),'" NumberOfCells="',ncells,'">'
     call xml(trim(line));call xml('<PointData/><CellData Scalars="Density">')
@@ -335,6 +340,7 @@ contains
             case(7);field(c)=beta_c(1,i,j)
             end select
             if(use_log_r.and.(q==eq_vx.or.q==7))field(c)=field(c)*exp(x(i))
+            if(polar_mesh_h/=1.0d0.and.q==eq_vy)field(c)=field(c)*polar_jacobian(y(j))
             ids(c)=int(i-1+x_global_offset,int64)+int(nx_global,int64)* &
               (int(j-1+y_global_offset,int64)+int(ny_global,int64)*int(k-1,int64))
           end do

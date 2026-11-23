@@ -1622,7 +1622,7 @@ contains
     real*8 :: h_plus, h_cross
     real*8 :: alpha, beta(3), eulerian_velocity(3)
     real*8 :: position(3), cartesian_velocity(3), flat_jacobian
-    real*8 :: cartesian_radius2, radial_grid_jacobian
+    real*8 :: cartesian_radius2, radial_grid_jacobian, polar_grid_jacobian
     real*8 :: horizon_radius, geometry_spin
     real*8 :: Ixx_cell, Iyy_cell, Ixy_cell
 
@@ -1642,7 +1642,7 @@ contains
     !$OMP PARALLEL DO PRIVATE(i, j, k, r, th, phi, rho, pres, dV, mass_radius3, &
     !$OMP alpha, beta, eulerian_velocity, position, &
     !$OMP cartesian_velocity, flat_jacobian, cartesian_radius2, radial_grid_jacobian) &
-    !$OMP PRIVATE(Ixx_cell, Iyy_cell, Ixy_cell) &
+    !$OMP PRIVATE(Ixx_cell, Iyy_cell, Ixy_cell, polar_grid_jacobian) &
     !$OMP REDUCTION(+:Ixx_ddot, Iyy_ddot, Ixy_ddot)
     do k = 1, nz
       do j = 1, ny
@@ -1659,7 +1659,7 @@ contains
           ! manifiestamente no física.
           if (gw_exclude_inside_horizon .and. r <= horizon_radius) cycle
 
-          th = y(j)
+          th = polar_angle(y(j))
           phi = z(k)
 
           rho = p(i,j,k,eq_de)
@@ -1673,6 +1673,11 @@ contains
           alpha = alpha_c(i,j)
           beta = beta_c(:,i,j)
           eulerian_velocity = p(i,j,k,eq_vx:eq_vz)
+          polar_grid_jacobian=polar_jacobian(y(j))
+          if (polar_mesh_h/=1.0d0) then
+            beta(2)=beta(2)*polar_grid_jacobian
+            eulerian_velocity(2)=eulerian_velocity(2)*polar_grid_jacobian
+          end if
           call gw_cartesian_kinematics(r, th, phi, geometry_spin, alpha, beta, &
                                        eulerian_velocity, use_log_r, position, &
                                        cartesian_velocity, flat_jacobian)
@@ -1682,6 +1687,7 @@ contains
           radial_grid_jacobian = 1.0d0
           if (use_log_r) radial_grid_jacobian = r
           dV = flat_jacobian * radial_grid_jacobian * dx * dy * dz
+          if (polar_mesh_h/=1.0d0) dV=dV*polar_grid_jacobian
 
           ! A orden newtoniano el potencial exterior sólo contiene el
           ! monopolo de masa. El spin afecta la dinámica GRHD y la geometría

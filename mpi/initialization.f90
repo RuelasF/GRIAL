@@ -394,9 +394,10 @@ contains
   ! Subrutina: initialize_problem
   ! Punto de entrada principal invocado desde grial.f90.
   ! Orquesta la llamada a todas las rutinas de setup en el orden topológico correcto.
-  subroutine initialize_problem(parameter_file, check_only)
+  subroutine initialize_problem(parameter_file, check_only, distributed)
     character(len=*), intent(in) :: parameter_file
     logical, intent(in) :: check_only
+    logical, intent(in), optional :: distributed
     real*8 :: torus_angular, torus_potential_in
     logical :: torus_valid
 
@@ -454,8 +455,13 @@ contains
     end select
 
     ! El preset aporta valores por omision; el archivo .par tiene la ultima palabra.
+    polar_mesh_h=1.0d0
     call read_parameter_file(parameter_file, .false.)
     call validate_parameters(parameter_file)
+    if (polar_mesh_h/=1.0d0) then
+      if (.not.present(distributed)) call parallel_abort('polar_mesh_h requiere --distributed')
+      if (.not.distributed) call parallel_abort('polar_mesh_h requiere --distributed')
+    end if
 
     ! 2. ASIGNACIÓN DE MÉTRICA
     call set_metric_type()

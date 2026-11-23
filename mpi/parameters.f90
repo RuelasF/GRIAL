@@ -169,6 +169,8 @@ contains
         call parse_geometry(value, geom_type, file_name, line_number)
       case('bh_mass')
         call parse_real_value(value, bh_mass, file_name, line_number)
+      case('polar_mesh_h')
+        call parse_real_value(value, polar_mesh_h, file_name, line_number)
       case('spin')
         call parse_real_value(value, a_spin, file_name, line_number)
       case('adiabatic_index')
@@ -406,6 +408,7 @@ contains
                    ieee_is_finite(y_min), ieee_is_finite(y_max), &
                    ieee_is_finite(z_min), ieee_is_finite(z_max), &
                    ieee_is_finite(adb_idx), ieee_is_finite(bh_mass), &
+                   ieee_is_finite(polar_mesh_h), &
                    ieee_is_finite(a_spin), ieee_is_finite(final_time), &
                    ieee_is_finite(CFL), ieee_is_finite(save_interval), &
                    ieee_is_finite(checkpoint_interval), &
@@ -420,6 +423,12 @@ contains
       call parameter_error(file_name, 0, 'los parametros reales deben ser finitos')
     end if
 
+    if (polar_mesh_h<=0.0d0.or.polar_mesh_h>1.0d0) &
+      call parameter_error(file_name,0,'polar_mesh_h requiere 0 < h <= 1')
+    if (polar_mesh_h/=1.0d0) then
+      if ((case_id/=12.and.case_id/=15).or.metric_type/='Kerr-Schild'.or.geom_type/='Spheroidal') &
+        call parameter_error(file_name,0,'polar_mesh_h requiere un toro FD/FM 3D en Kerr-Schild')
+    end if
     if (nx < 1 .or. ny < 1 .or. nz < 1) then
       call parameter_error(file_name, 0, 'nx, ny y nz deben ser positivos')
     end if
@@ -715,6 +724,7 @@ contains
     write(*,'(A,3(I0,1X))') 'Malla nx ny nz: ', nx, ny, nz
     write(*,'(A,2(ES13.5,1X))') 'r_min r_max: ', r_min, r_max
     if (is_polar_geometry(geom_type)) then
+      if (polar_mesh_h/=1.0d0) write(*,'(A,ES24.16E3)') 'polar_mesh_h: ',polar_mesh_h
       write(*,'(A,2(F10.6,1X))') 'theta_min theta_max [pi]: ', y_min/pi, y_max/pi
       write(*,'(A,2(F10.6,1X))') 'phi_min phi_max [pi]: ', z_min/pi, z_max/pi
     end if

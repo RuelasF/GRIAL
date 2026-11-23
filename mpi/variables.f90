@@ -136,6 +136,7 @@ module variables
     ! BANDERAS DE CONTROL GLOBAL
     ! ==========================================================
     character(len=20) :: geom_type               ! 'Cartesian', 'Cylindrical', 'Spherical', 'Spheroidal'
+    real*8 :: polar_mesh_h=1.0d0
     logical :: use_log_r = .false.               ! .true. comprime 1ra dimensión
 
     character(len=30) :: metric_type             ! 'Minkowski', 'Eddington-Finkelstein', 'Kerr'

@@ -23,7 +23,7 @@ module metrics
   ! ========================================================================
   public :: calculate_metric, calculate_christoffel_symbols, &
             calculate_metric_derivatives, calculate_stress_energy_tensor, &
-            set_metric_type, event_horizon_radius
+            set_metric_type, event_horizon_radius, polar_angle, polar_jacobian
 
   ! ========================================================================
   ! INTERFACES ABSTRACTAS (Plantillas para los punteros de función)
@@ -56,6 +56,9 @@ module metrics
   procedure(i_metric), pointer :: calculate_metric => null()
   procedure(i_christoffel), pointer :: calculate_christoffel_symbols => null()
   procedure(i_metric_derivs), pointer :: calculate_metric_derivatives => null()
+  procedure(i_metric), pointer :: polar_base_metric => null()
+  procedure(i_christoffel), pointer :: polar_base_christoffel => null()
+  procedure(i_metric_derivs), pointer :: polar_base_derivatives => null()
 
 contains
 
@@ -198,7 +201,95 @@ contains
         stop
 
     end select
+
+    if (polar_mesh_h/=1.0d0) then
+      polar_base_metric=>calculate_metric
+      polar_base_christoffel=>calculate_christoffel_symbols
+      polar_base_derivatives=>calculate_metric_derivatives
+      calculate_metric=>metric_polar
+      calculate_metric_derivatives=>metric_derivs_polar
+      calculate_christoffel_symbols=>christoffel_polar
+    end if
   end subroutine set_metric_type
+
+  pure real*8 function polar_angle(q) result(theta)
+    real*8, intent(in) :: q
+    theta=q
+    if (polar_mesh_h/=1.0d0.and.q/=0.0d0.and.q/=pi) &
+      theta=q+0.5d0*(1.0d0-polar_mesh_h)*sin(2.0d0*q)
+  end function polar_angle
+
+  pure real*8 function polar_jacobian(q) result(jac)
+    real*8, intent(in) :: q
+    jac=1.0d0
+    if (polar_mesh_h/=1.0d0) jac=polar_mesh_h+2.0d0*(1.0d0-polar_mesh_h)*cos(q)**2
+  end function polar_jacobian
+
+  subroutine metric_polar(x_pos,y_pos,alpha,beta,gamma,gmunu,det,dlnalpha)
+    real*8, intent(in) :: x_pos,y_pos
+    real*8, intent(out), optional :: alpha,beta(3),gamma(3,3),gmunu(0:3,0:3),det,dlnalpha(0:3)
+    real*8 :: jac
+
+    jac=polar_jacobian(y_pos)
+    call polar_base_metric(x_pos,polar_angle(y_pos),alpha,beta,gamma,gmunu,det,dlnalpha)
+    if (present(beta)) beta(2)=beta(2)/jac
+    if (present(gamma)) then
+      gamma(2,:)=jac*gamma(2,:)
+      gamma(:,2)=jac*gamma(:,2)
+    end if
+    if (present(gmunu)) then
+      gmunu(2,:)=gmunu(2,:)/jac
+      gmunu(:,2)=gmunu(:,2)/jac
+    end if
+    if (present(det)) det=det*jac**2
+    if (present(dlnalpha)) dlnalpha(2)=dlnalpha(2)*jac
+  end subroutine metric_polar
+
+  subroutine metric_derivs_polar(x_pos,y_pos,dg)
+    real*8, intent(in) :: x_pos,y_pos
+    real*8, intent(out) :: dg(0:3,0:3,1:3)
+    real*8 :: theta,jac,jac_prime,cov(0:3,0:3),scale(0:3),ds(0:3),alpha,beta(3),g(3,3)
+    integer :: mu,nu,d
+
+    theta=polar_angle(y_pos)
+    jac=polar_jacobian(y_pos)
+    jac_prime=-2.0d0*(1.0d0-polar_mesh_h)*sin(2.0d0*y_pos)
+    call polar_base_derivatives(x_pos,theta,dg)
+    call polar_base_metric(x_pos,theta,alpha=alpha,beta=beta,gamma=g)
+    cov(1:3,1:3)=g
+    cov(0,1:3)=matmul(g,beta);cov(1:3,0)=cov(0,1:3)
+    cov(0,0)=-alpha**2+dot_product(beta,cov(0,1:3))
+    scale=[1.0d0,1.0d0,jac,1.0d0]
+    ds=[0.0d0,0.0d0,jac_prime,0.0d0]
+    do d=1,3
+      do nu=0,3
+        do mu=0,3
+          dg(mu,nu,d)=scale(mu)*scale(nu)*dg(mu,nu,d)
+          if (d==2) dg(mu,nu,d)=jac*dg(mu,nu,d)+(ds(mu)*scale(nu)+scale(mu)*ds(nu))*cov(mu,nu)
+        end do
+      end do
+    end do
+  end subroutine metric_derivs_polar
+
+  subroutine christoffel_polar(x_pos,y_pos,chris)
+    real*8, intent(in) :: x_pos,y_pos
+    real*8, intent(out) :: chris(0:3,0:3,0:3)
+    real*8 :: jac,jac_prime,scale(0:3)
+    integer :: a,b,c
+
+    jac=polar_jacobian(y_pos)
+    jac_prime=-2.0d0*(1.0d0-polar_mesh_h)*sin(2.0d0*y_pos)
+    call polar_base_christoffel(x_pos,polar_angle(y_pos),chris)
+    scale=[1.0d0,1.0d0,jac,1.0d0]
+    do c=0,3
+      do b=0,3
+        do a=0,3
+          chris(a,b,c)=scale(b)*scale(c)*chris(a,b,c)/scale(a)
+        end do
+      end do
+    end do
+    chris(2,2,2)=chris(2,2,2)+jac_prime/jac
+  end subroutine christoffel_polar
 
 
   ! %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

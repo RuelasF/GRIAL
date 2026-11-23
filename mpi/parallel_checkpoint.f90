@@ -22,6 +22,7 @@ module parallel_checkpoint
   public :: read_parallel_checkpoint_configuration,read_serial_checkpoint_configuration,import_serial_checkpoint
   public :: checkpoint_file_signature
   character(len=16), parameter :: BLOCK_MAGIC='GRIAL_CP_BLOCK1',MANIFEST_MAGIC='GRIAL_MPI_CP_V1'
+  character(len=8), parameter :: POLAR_CONFIG_MAGIC='GRPOLAR1'
   character(len=16), parameter :: COMMIT_MAGIC='GRIAL_CP_COMMIT1',END_MAGIC='GRIAL_CP_END1'
   integer, parameter :: ABI(5)=[storage_size(0),storage_size(0_int64),storage_size(1.0d0), &
     storage_size(.true.),int(z'01020304')]
@@ -191,6 +192,8 @@ contains
     open(newunit=unit,status='scratch',access='stream',form='unformatted',iostat=status)
     if (status/=0) return
     call write_checkpoint_metadata(unit,status,layout%global_shape,.true.)
+    ! The identity map keeps the original configuration record byte for byte.
+    if (status==0.and.polar_mesh_h/=1.0d0) write(unit,iostat=status) POLAR_CONFIG_MAGIC,polar_mesh_h
     if (status==0) inquire(unit=unit,size=length,iostat=status)
     if (status==0) allocate(bytes(length),stat=status)
     if (status==0) read(unit,pos=1,iostat=status) bytes
@@ -631,6 +634,9 @@ contains
     type(checkpoint_manifest) :: manifest
     integer(int64) :: signature(2)
     integer :: unit,ios,close_status,parts(2)
+    integer(int64) :: position
+    character(len=len(POLAR_CONFIG_MAGIC)) :: polar_magic
+    real*8 :: saved_h
     logical :: ok
     character(len=160) :: message
     layout=domain_layout()
@@ -651,6 +657,23 @@ contains
       status='old',action='read',iostat=ios)
     if(ios==0)then
       call read_checkpoint_metadata(unit,ios)
+      saved_h=1.0d0
+      if (ios==0) inquire(unit=unit,pos=position,iostat=ios)
+      if (ios==0) then
+        select case(manifest%configuration(1)-position+1)
+        case(0_int64)
+        case(len(POLAR_CONFIG_MAGIC)+storage_size(saved_h)/8)
+          read(unit,iostat=ios) polar_magic,saved_h
+          if (ios==0) then
+            if (polar_magic/=POLAR_CONFIG_MAGIC.or..not.ieee_is_finite(saved_h)) ios=1
+          end if
+          if (ios==0) then
+            if (saved_h<=0.0d0.or.saved_h>=1.0d0) ios=1
+          end if
+        case default
+          ios=1
+        end select
+      end if
       close(unit,iostat=close_status)
       if(ios==0)ios=close_status
     end if
@@ -658,6 +681,7 @@ contains
     if(.not.ok)goto 900
     ok=io_agreement(all([nx,ny,nz]==manifest%global_shape).and.nghost==manifest%halo)
     if(.not.ok)goto 900
+    polar_mesh_h=saved_h
     call validate_parameters(path)
     g1=adb_idx/(adb_idx-1.0d0);call set_metric_type()
     do_restart=.false.;do_radial_mass_budget=.false.
@@ -1044,6 +1068,7 @@ contains
     logical :: ok,periodic
     character(len=160) :: message
     layout=domain_layout();serial_source_path=''
+    polar_mesh_h=1.0d0
     if(allocated(serial_configuration))deallocate(serial_configuration)
     call agree_path(path,present(status),4)
     call parallel_require_collective(.not.allocated(up).and..not.allocated(p).and..not.allocated(u).and. &

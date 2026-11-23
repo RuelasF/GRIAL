@@ -68,6 +68,23 @@ de tiempo calculado sobre la geometría fija. La opción viene desactivada y
 agrega el sufijo `_cfl_cache` al ejecutable. `PROFILE=1` construye el perfilador
 `grial_mpi_profile` y requiere `OVERLAP=0`.
 
+Con el perfilador activo, `GRIAL_COLLECTIVE_TRACE=1` escribe
+`grial_collectives_rank_*.tsv` en la carpeta de trabajo. Cada rango registra
+hasta 131072 llamadas con el sitio y las marcas de entrada y retorno.
+En un mismo host GNU/Linux se pueden comparar esas marcas entre rangos.
+El intervalo posterior a la última entrada también incluye el trabajo local
+del colectivo. Las marcas de distintos nodos carecen de una referencia común.
+
+### Malla polar para toros 3D
+
+En `--distributed`, los toros FD/FM en Kerr–Schild admiten
+`polar_mesh_h = 0.3` en el archivo de parámetros. Para la coordenada lógica
+uniforme `q`, el ángulo físico es `theta = q + (1-h) sin(2q)/2`.
+El valor predeterminado `h = 1` conserva la malla uniforme. Con `0 < h < 1`
+hay más resolución angular cerca del ecuador. El checkpoint guarda el mapa
+para `--resume` y las piezas VTK se escriben en coordenadas físicas.
+Un checkpoint mapeado requiere un ejecutable que admita esta opción.
+
 Para actualizar la versión de referencia, apunta tu clon a `main`, ejecuta
 `git pull --ff-only` y recompila la variante deseada desde `mpi/`.
 

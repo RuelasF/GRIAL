@@ -53,7 +53,10 @@ def read_piece(path):
         meta[name] = values[0] if len(values) == 1 else values
     expected_meta = {'TimeValue', 'Step', 'GlobalShape', 'LocalShape', 'GlobalOffset', 'ProcessGrid',
                      'Rank', 'MappingId', 'LogRadius', 'Spin'}
-    require(set(meta) == expected_meta, f'{path}: incomplete metadata')
+    require(set(meta) in (expected_meta, expected_meta | {'PolarMeshH'}), f'{path}: incomplete metadata')
+    if 'PolarMeshH' in meta:
+        h = meta['PolarMeshH']
+        require(isinstance(h, float) and 0 < h < 1, f'{path}: invalid polar mesh parameter')
     require(meta['TimeValue'] >= 0 and meta['Step'] >= 0 and meta['Rank'] >= 0, f'{path}: invalid epoch/rank')
     for key, count in [('GlobalShape', 3), ('LocalShape', 3), ('GlobalOffset', 3), ('ProcessGrid', 2)]:
         require(isinstance(meta[key], list) and len(meta[key]) == count, f'{path}: invalid {key}')
@@ -137,6 +140,8 @@ def read_frame(directory, reconstruct=False):
                 fields = {key: array('d', [0.0]) * math.prod(meta['GlobalShape']) for key in FIELDS}
         for key in ['GlobalShape', 'ProcessGrid', 'TimeValue', 'Step', 'MappingId', 'LogRadius', 'Spin']:
             require(meta[key] == frame[key], f'piece metadata mismatch: {key}')
+        require(meta.get('PolarMeshH', 1.0) == frame.get('PolarMeshH', 1.0),
+                'piece metadata mismatch: PolarMeshH')
         expected_shape = list(frame['GlobalShape'])
         expected_offset = [0, 0, 0]
         for axis, coord in enumerate([rank % frame['ProcessGrid'][0], rank // frame['ProcessGrid'][0]]):

@@ -162,7 +162,7 @@ contains
     else
       call agree_input(trim(source));call read_parameter_header(trim(source))
       call parallel_require_collective(.not.do_restart,'use --distributed --resume with an observed checkpoint directory')
-      call initialize_problem(trim(source),.true.)
+      call initialize_problem(trim(source),.true.,distributed=.true.)
       call build_domain([nx,ny,nz],nghost,parallel_rank,parallel_size,case_id==4.or.case_id==6, &
         layout,message,grid,(case_id==4.or.case_id==6).and.ny>1)
       call parallel_require_collective(len_trim(message)==0,message)
@@ -342,6 +342,8 @@ contains
           if(ios==0)write(unit,'(A,I0)',iostat=ios)'ranks=',parallel_size
           if(ios==0)write(unit,'(A,I0)',iostat=ios)'grid_r=',grid(1)
           if(ios==0)write(unit,'(A,I0)',iostat=ios)'grid_theta=',grid(2)
+          if(ios==0.and.polar_mesh_h/=1.0d0) &
+            write(unit,'(A,ES24.16E3)',iostat=ios)'polar_mesh_h=',polar_mesh_h
           if(ios==0)write(unit,'(A,I0)',iostat=ios)'session_start_step=',start_step
           if(ios==0)write(unit,'(A,ES24.16E3)',iostat=ios)'elapsed_seconds=',wall_time_seconds()-started
           if(ios==0)write(unit,'(A,ES24.16E3)',iostat=ios)'setup_seconds=',setup_seconds

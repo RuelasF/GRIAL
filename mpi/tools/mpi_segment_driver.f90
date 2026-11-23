@@ -63,7 +63,7 @@ program mpi_segment_driver
   if(trim(mode)=='cold')then
     call read_parameter_header(trim(source))
     call parallel_require_collective(.not.do_restart,'cold segment requires a cold parameter file')
-    call initialize_problem(trim(source),.true.)
+    call initialize_problem(trim(source),.true.,distributed=.true.)
     periodic=case_id==4.or.case_id==6
     call build_domain([nx,ny,nz],nghost,parallel_rank,parallel_size,periodic,layout,message,grid,periodic.and.ny>1)
     call parallel_require_collective(len_trim(message)==0,message)

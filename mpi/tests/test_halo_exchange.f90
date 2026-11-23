@@ -273,7 +273,7 @@ contains
     nx=layout%local_shape(1)
     nx_global=n_global;ny_global=ny;nz_global=nz;x_global_offset=layout%offset(1)
     if (trim(mode)=='bad-polar') then
-      allocate(alpha_c(nx,ny,nz),beta_c(3,nx,ny,nz))
+      allocate(alpha_c(nx,ny),beta_c(3,nx,ny))
       alpha_c=1.0d0;beta_c=0.0d0
     end if
     if (trim(mode)=='bad-layout'.and.parallel_rank==parallel_size-1) layout%offset(1)=layout%offset(1)+1

@@ -477,9 +477,9 @@ contains
           end if
 
           ! Usamos la caché de la métrica
-          alpha = alpha_c(i,j,k)
-          beta(:) = beta_c(:,i,j,k)
-          g(:,:) = gamma_c(:,:,i,j,k)
+          alpha = alpha_c(i,j)
+          beta(:) = beta_c(:,i,j)
+          g(:,:) = gamma_c(:,:,i,j)
 
           if (fm_model) then
             call evaluate_fishbone_moncrief_state(r_loc,r_in,K_poly,l_ang,W_in, &
@@ -970,8 +970,8 @@ contains
         write(*,*) 'CRITICAL ERROR: radial outflow boundaries require the metric cache.'
         error stop 1
       end if
-      if (size(alpha_c,1) < nx .or. size(alpha_c,2) < ny .or. size(alpha_c,3) < nz .or. &
-          size(beta_c,2) < nx .or. size(beta_c,3) < ny .or. size(beta_c,4) < nz) then
+      if (size(alpha_c,1) < nx .or. size(alpha_c,2) < ny .or. &
+          size(beta_c,2) < nx .or. size(beta_c,3) < ny) then
         write(*,*) 'CRITICAL ERROR: metric cache dimensions do not match the fluid grid.'
         error stop 1
       end if
@@ -1119,7 +1119,7 @@ contains
               q_state(1-g,j,k,:) = q_state(1,j,k,:)
               q_state(1-g,j,k,eq_de) = max(q_state(1,j,k,eq_de), rho_floor)
               q_state(1-g,j,k,eq_pr) = max(q_state(1,j,k,eq_pr), p_floor)
-              q_state(1-g,j,k,eq_vx) = min(beta_c(1,1,j,k)/alpha_c(1,j,k), &
+              q_state(1-g,j,k,eq_vx) = min(beta_c(1,1,j)/alpha_c(1,j), &
                                                        q_state(1,j,k,eq_vx))
               if (q_state(1,j,k,eq_de) < 1.0d-6) q_state(1-g,j,k,eq_vy:eq_vz) = 0.0d0
             end if
@@ -1127,7 +1127,7 @@ contains
             if (upper_x) then
               q_state(nx+g,j,k,eq_de) = max(q_state(nx,j,k,eq_de), rho_floor)
               q_state(nx+g,j,k,eq_pr) = max(q_state(nx,j,k,eq_pr), p_floor)
-              q_state(nx+g,j,k,eq_vx) = max(beta_c(1,nx,j,k)/alpha_c(nx,j,k), &
+              q_state(nx+g,j,k,eq_vx) = max(beta_c(1,nx,j)/alpha_c(nx,j), &
                                                         q_state(nx,j,k,eq_vx))
               q_state(nx+g,j,k,eq_vy) = q_state(nx,j,k,eq_vy)
               q_state(nx+g,j,k,eq_vz) = q_state(nx,j,k,eq_vz)
@@ -1158,7 +1158,7 @@ contains
               q_state(1-g,j,k,eq_de) = max(q_state(1,j,k,eq_de), rho_floor)
               q_state(1-g,j,k,eq_pr) = max(q_state(1,j,k,eq_pr), p_floor)
               ! No entra fluido desde la excisión: alpha*v^r-beta^r <= 0.
-              q_state(1-g,j,k,eq_vx) = min(beta_c(1,1,j,k)/alpha_c(1,j,k), &
+              q_state(1-g,j,k,eq_vx) = min(beta_c(1,1,j)/alpha_c(1,j), &
                                                        q_state(1,j,k,eq_vx))
             end if
 
@@ -1168,7 +1168,7 @@ contains
               q_state(nx+g,j,k,eq_de) = max(q_state(nx,j,k,eq_de), rho_floor)
               q_state(nx+g,j,k,eq_pr) = max(q_state(nx,j,k,eq_pr), p_floor)
               ! No entra fluido desde el exterior: alpha*v^r-beta^r >= 0.
-              q_state(nx+g,j,k,eq_vx) = max(beta_c(1,nx,j,k)/alpha_c(nx,j,k), &
+              q_state(nx+g,j,k,eq_vx) = max(beta_c(1,nx,j)/alpha_c(nx,j), &
                                                         q_state(nx,j,k,eq_vx))
             end if
           end do
@@ -1216,7 +1216,7 @@ contains
               q_state(1-g,j,k,:) = q_state(1,j,k,:)
               q_state(1-g,j,k,eq_de) = max(q_state(1,j,k,eq_de), rho_floor)
               q_state(1-g,j,k,eq_pr) = max(q_state(1,j,k,eq_pr), p_floor)
-              q_state(1-g,j,k,eq_vx) = min(beta_c(1,1,j,k)/alpha_c(1,j,k), &
+              q_state(1-g,j,k,eq_vx) = min(beta_c(1,1,j)/alpha_c(1,j), &
                                                        q_state(1,j,k,eq_vx))
             end if
 
@@ -1225,7 +1225,7 @@ contains
               q_state(nx+g,j,k,:) = q_state(nx,j,k,:)
               q_state(nx+g,j,k,eq_de) = max(q_state(nx,j,k,eq_de), rho_floor)
               q_state(nx+g,j,k,eq_pr) = max(q_state(nx,j,k,eq_pr), p_floor)
-              q_state(nx+g,j,k,eq_vx) = max(beta_c(1,nx,j,k)/alpha_c(nx,j,k), &
+              q_state(nx+g,j,k,eq_vx) = max(beta_c(1,nx,j)/alpha_c(nx,j), &
                                                         q_state(nx,j,k,eq_vx))
             end if
           end do
@@ -1367,10 +1367,10 @@ contains
         end do
         q_state(1-g,j,k,eq_de)=max(q_state(1,j,k,eq_de),rho_floor)
         q_state(1-g,j,k,eq_pr)=max(q_state(1,j,k,eq_pr),p_floor)
-        q_state(1-g,j,k,eq_vx)=min(beta_c(1,1,j,k)/alpha_c(1,j,k),q_state(1,j,k,eq_vx))
+        q_state(1-g,j,k,eq_vx)=min(beta_c(1,1,j)/alpha_c(1,j),q_state(1,j,k,eq_vx))
         q_state(nx+g,j,k,eq_de)=max(q_state(nx,j,k,eq_de),rho_floor)
         q_state(nx+g,j,k,eq_pr)=max(q_state(nx,j,k,eq_pr),p_floor)
-        q_state(nx+g,j,k,eq_vx)=max(beta_c(1,nx,j,k)/alpha_c(nx,j,k),q_state(nx,j,k,eq_vx))
+        q_state(nx+g,j,k,eq_vx)=max(beta_c(1,nx,j)/alpha_c(nx,j),q_state(nx,j,k,eq_vx))
         if ((case_id == 9 .or. case_id == 10 .or. case_id == 13) .and. q_state(1,j,k,eq_de) < 1.0d-6) then
           q_state(1-g,j,k,eq_vy)=0.0d0
           q_state(1-g,j,k,eq_vz)=0.0d0

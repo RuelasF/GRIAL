@@ -1261,10 +1261,10 @@ contains
     integer :: mu, nu, ii, jj  ! ii, jj agregados para proteger i, j
 
     ! 1. LEER DE LA CACHÉ GLOBAL (Centros)
-    alpha      = alpha_c(i,j,k)
-    beta(:)    = beta_c(:,i,j,k)
-    g(:,:)     = gamma_c(:,:,i,j,k)
-    gmunu(:,:) = gmunu_c(:,:,i,j,k)
+    alpha      = alpha_c(i,j)
+    beta(:)    = beta_c(:,i,j)
+    g(:,:)     = gamma_c(:,:,i,j)
+    gmunu(:,:) = gmunu_c(:,:,i,j)
 
     v(1) = prim_state(eq_vx)
     v(2) = prim_state(eq_vy)

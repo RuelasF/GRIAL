@@ -87,7 +87,7 @@ contains
       allocated(x_face).and.allocated(y_face).and.allocated(z_face)
     call parallel_require_collective(valid,'VTK fields or coordinates are not allocated')
     valid=all(shape(p)==[nx+2*nghost+1,ny+2*nghost+1,nz+2*nghost+1,neq]).and. &
-      all(shape(alpha_c)==[nx,ny,nz]).and.all(shape(beta_c)==[3,nx,ny,nz])
+      all(shape(alpha_c)==[nx,ny]).and.all(shape(beta_c)==[3,nx,ny])
     call parallel_require_collective(valid,'VTK field shapes do not match layout')
     call parallel_require_collective(.not.accelerator_enabled.and..not.is_mhd.and.neq==5, &
       'VTK pieces require CPU hydrodynamics')
@@ -286,8 +286,8 @@ contains
             c=c+1
             select case(q)
             case(1:5);field(c)=p(i,j,k,q)
-            case(6);field(c)=alpha_c(i,j,k)
-            case(7);field(c)=beta_c(1,i,j,k)
+            case(6);field(c)=alpha_c(i,j)
+            case(7);field(c)=beta_c(1,i,j)
             end select
             if(use_log_r.and.(q==eq_vx.or.q==7))field(c)=field(c)*exp(x(i))
             ids(c)=int(i-1+x_global_offset,int64)+int(nx_global,int64)* &

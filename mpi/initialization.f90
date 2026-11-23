@@ -237,37 +237,37 @@ contains
     ! ==========================================================
     ! ALOCACIÓN DE LA CACHÉ DE MÉTRICA
     ! ==========================================================
-    ! 1. Centros (1:nx, 1:ny, 1:nz)
-    allocate(alpha_c(1:nx, 1:ny, 1:nz))
-    allocate(beta_c(3, 1:nx, 1:ny, 1:nz))
-    allocate(gamma_c(3, 3, 1:nx, 1:ny, 1:nz))
-    allocate(gamma_inv_c(3, 3, 1:nx, 1:ny, 1:nz))
-    allocate(gmunu_c(0:3, 0:3, 1:nx, 1:ny, 1:nz))
-    allocate(sqrt_gamma_c(1:nx, 1:ny, 1:nz))
-    allocate(chris_c(0:3, 0:3, 0:3, 1:nx, 1:ny, 1:nz))
-    allocate(dg_c(0:3, 0:3, 1:3, 1:nx, 1:ny, 1:nz))
-    allocate(dlna_c(0:3, 1:nx, 1:ny, 1:nz))
+    ! 1. Centros (1:nx, 1:ny)
+    allocate(alpha_c(1:nx, 1:ny))
+    allocate(beta_c(3, 1:nx, 1:ny))
+    allocate(gamma_c(3, 3, 1:nx, 1:ny))
+    allocate(gamma_inv_c(3, 3, 1:nx, 1:ny))
+    allocate(gmunu_c(0:3, 0:3, 1:nx, 1:ny))
+    allocate(sqrt_gamma_c(1:nx, 1:ny))
+    allocate(chris_c(0:3, 0:3, 0:3, 1:nx, 1:ny))
+    allocate(dg_c(0:3, 0:3, 1:3, 1:nx, 1:ny))
+    allocate(dlna_c(0:3, 1:nx, 1:ny))
 
-    ! 2. Interfaces X (1:nx+1, 1:ny, 1:nz)
-    allocate(alpha_f_x(1:nx+1, 1:ny, 1:nz))
-    allocate(beta_f_x(3, 1:nx+1, 1:ny, 1:nz))
-    allocate(gamma_f_x(3, 3, 1:nx+1, 1:ny, 1:nz))
-    allocate(sqrt_gamma_f_x(1:nx+1, 1:ny, 1:nz))
+    ! 2. Interfaces X (1:nx+1, 1:ny)
+    allocate(alpha_f_x(1:nx+1, 1:ny))
+    allocate(beta_f_x(3, 1:nx+1, 1:ny))
+    allocate(gamma_f_x(3, 3, 1:nx+1, 1:ny))
+    allocate(sqrt_gamma_f_x(1:nx+1, 1:ny))
 
-    ! 3. Interfaces Y (1:nx, 1:ny+1, 1:nz)
+    ! 3. Interfaces Y (1:nx, 1:ny+1)
     if (ny > 1) then
-      allocate(alpha_f_y(1:nx, 1:ny+1, 1:nz))
-      allocate(beta_f_y(3, 1:nx, 1:ny+1, 1:nz))
-      allocate(gamma_f_y(3, 3, 1:nx, 1:ny+1, 1:nz))
-      allocate(sqrt_gamma_f_y(1:nx, 1:ny+1, 1:nz))
+      allocate(alpha_f_y(1:nx, 1:ny+1))
+      allocate(beta_f_y(3, 1:nx, 1:ny+1))
+      allocate(gamma_f_y(3, 3, 1:nx, 1:ny+1))
+      allocate(sqrt_gamma_f_y(1:nx, 1:ny+1))
     end if
 
-    ! 4. Interfaces Z (1:nx, 1:ny, 1:nz+1)
+    ! 4. Interfaces Z (1:nx, 1:ny)
     if (nz > 1) then
-      allocate(alpha_f_z(1:nx, 1:ny, 1:nz+1))
-      allocate(beta_f_z(3, 1:nx, 1:ny, 1:nz+1))
-      allocate(gamma_f_z(3, 3, 1:nx, 1:ny, 1:nz+1))
-      allocate(sqrt_gamma_f_z(1:nx, 1:ny, 1:nz+1))
+      allocate(alpha_f_z(1:nx, 1:ny))
+      allocate(beta_f_z(3, 1:nx, 1:ny))
+      allocate(gamma_f_z(3, 3, 1:nx, 1:ny))
+      allocate(sqrt_gamma_f_z(1:nx, 1:ny))
     end if
 
   end subroutine allocate_and_grid
@@ -275,7 +275,7 @@ contains
   subroutine precalculate_metric_cache()
     use variables
     implicit none
-    integer :: i, j, k, ii, jj
+    integer :: i, j, ii, jj
     real*8  :: a, b(3), g(3,3), gmunu_loc(0:3,0:3)
     real*8  :: det_local, dlna_local(0:3)
     real*8  :: chris_local(0:3,0:3,0:3), dg_local(0:3,0:3,1:3)
@@ -286,47 +286,45 @@ contains
     ! ========================================================
     ! 1. MÉTRICA EN LOS CENTROS CELULARES
     ! ========================================================
-    !$OMP PARALLEL DO PRIVATE(i, j, k, a, b, g, gmunu_loc, det_local, dlna_local, chris_local, dg_local) COLLAPSE(3)
-    do k = 1, nz
-      do j = 1, ny
-        do i = 1, nx
-          ! Llamada estricta por keywords. Extraemos dlnalpha y el det_local EXACTO desde aquí.
-          call calculate_metric(x(i), y(j), alpha=a, beta=b, gamma=g, gmunu=gmunu_loc, det=det_local, dlnalpha=dlna_local)
-          call calculate_christoffel_symbols(x(i), y(j), chris_local)
-          call calculate_metric_derivatives(x(i), y(j), dg_local)
+    !$OMP PARALLEL DO PRIVATE(i, j, a, b, g, gmunu_loc, det_local, dlna_local, chris_local, dg_local) COLLAPSE(2)
+    do j = 1, ny
+      do i = 1, nx
+        ! Llamada estricta por keywords. Extraemos dlnalpha y el det_local EXACTO desde aquí.
+        call calculate_metric(x(i), y(j), alpha=a, beta=b, gamma=g, gmunu=gmunu_loc, det=det_local, dlnalpha=dlna_local)
+        call calculate_christoffel_symbols(x(i), y(j), chris_local)
+        call calculate_metric_derivatives(x(i), y(j), dg_local)
 
-          alpha_c(i,j,k) = a
-          beta_c(:,i,j,k) = b(:)
-          gamma_c(:,:,i,j,k) = g(:,:)
-          gmunu_c(:,:,i,j,k) = gmunu_loc(:,:)
+        alpha_c(i,j) = a
+        beta_c(:,i,j) = b(:)
+        gamma_c(:,:,i,j) = g(:,:)
+        gmunu_c(:,:,i,j) = gmunu_loc(:,:)
 
-          ! --- CÁLCULO DE LA INVERSA ESPACIAL (Fórmula ADM) ---
-          ! Relación exacta: gamma^ij = g^ij + (beta^i * beta^j) / alpha^2
-          ! Usando gmunu_loc que contiene la métrica 4D contravariante g^munu
-          do ii = 1, 3
-            do jj = 1, 3
-              gamma_inv_c(ii,jj,i,j,k) = gmunu_loc(ii,jj) + (b(ii) * b(jj)) / (a**2)
-            end do
+        ! --- CÁLCULO DE LA INVERSA ESPACIAL (Fórmula ADM) ---
+        ! Relación exacta: gamma^ij = g^ij + (beta^i * beta^j) / alpha^2
+        ! Usando gmunu_loc que contiene la métrica 4D contravariante g^munu
+        do ii = 1, 3
+          do jj = 1, 3
+            gamma_inv_c(ii,jj,i,j) = gmunu_loc(ii,jj) + (b(ii) * b(jj)) / (a**2)
           end do
-
-          ! --- CÁLCULO DE LA INVERSA ESPACIAL (Regla de Cramer Exacta) ---
-          ! Usamos el det_local analítico puro para garantizar consistencia de bits.
-          ! gamma_inv_c(1,1,i,j,k) = (g(2,2)*g(3,3) - g(2,3)*g(3,2)) / det_local
-          ! gamma_inv_c(1,2,i,j,k) = (g(1,3)*g(3,2) - g(1,2)*g(3,3)) / det_local
-          ! gamma_inv_c(1,3,i,j,k) = (g(1,2)*g(2,3) - g(1,3)*g(2,2)) / det_local
-          ! gamma_inv_c(2,1,i,j,k) = gamma_inv_c(1,2,i,j,k)
-          ! gamma_inv_c(2,2,i,j,k) = (g(1,1)*g(3,3) - g(1,3)*g(3,1)) / det_local
-          ! gamma_inv_c(2,3,i,j,k) = (g(1,2)*g(3,1) - g(1,1)*g(3,2)) / det_local
-          ! gamma_inv_c(3,1,i,j,k) = gamma_inv_c(1,3,i,j,k)
-          ! gamma_inv_c(3,2,i,j,k) = gamma_inv_c(2,3,i,j,k)
-          ! gamma_inv_c(3,3,i,j,k) = (g(1,1)*g(2,2) - g(1,2)*g(2,1)) / det_local
-
-          ! Raíz del determinante se mantiene pura y analítica
-          sqrt_gamma_c(i,j,k) = sqrt(det_local)
-          chris_c(:,:,:,i,j,k) = chris_local(:,:,:)
-          dg_c(:,:,:,i,j,k)    = dg_local(:,:,:)
-          dlna_c(:,i,j,k)      = dlna_local(:)
         end do
+
+        ! --- CÁLCULO DE LA INVERSA ESPACIAL (Regla de Cramer Exacta) ---
+        ! Usamos el det_local analítico puro para garantizar consistencia de bits.
+        ! gamma_inv_c(1,1,i,j) = (g(2,2)*g(3,3) - g(2,3)*g(3,2)) / det_local
+        ! gamma_inv_c(1,2,i,j) = (g(1,3)*g(3,2) - g(1,2)*g(3,3)) / det_local
+        ! gamma_inv_c(1,3,i,j) = (g(1,2)*g(2,3) - g(1,3)*g(2,2)) / det_local
+        ! gamma_inv_c(2,1,i,j) = gamma_inv_c(1,2,i,j)
+        ! gamma_inv_c(2,2,i,j) = (g(1,1)*g(3,3) - g(1,3)*g(3,1)) / det_local
+        ! gamma_inv_c(2,3,i,j) = (g(1,2)*g(3,1) - g(1,1)*g(3,2)) / det_local
+        ! gamma_inv_c(3,1,i,j) = gamma_inv_c(1,3,i,j)
+        ! gamma_inv_c(3,2,i,j) = gamma_inv_c(2,3,i,j)
+        ! gamma_inv_c(3,3,i,j) = (g(1,1)*g(2,2) - g(1,2)*g(2,1)) / det_local
+
+        ! Raíz del determinante se mantiene pura y analítica
+        sqrt_gamma_c(i,j) = sqrt(det_local)
+        chris_c(:,:,:,i,j) = chris_local(:,:,:)
+        dg_c(:,:,:,i,j)    = dg_local(:,:,:)
+        dlna_c(:,i,j)      = dlna_local(:)
       end do
     end do
     !$OMP END PARALLEL DO
@@ -334,17 +332,15 @@ contains
     ! ========================================================
     ! 2. MÉTRICA EN LAS INTERFACES X
     ! ========================================================
-    !$OMP PARALLEL DO PRIVATE(i, j, k, a, b, g, det_local) COLLAPSE(3)
-    do k = 1, nz
-      do j = 1, ny
-        do i = 1, nx+1
-          call calculate_metric(x_face(i-1), y(j), alpha=a, beta=b, gamma=g, det=det_local)
+    !$OMP PARALLEL DO PRIVATE(i, j, a, b, g, det_local) COLLAPSE(2)
+    do j = 1, ny
+      do i = 1, nx+1
+        call calculate_metric(x_face(i-1), y(j), alpha=a, beta=b, gamma=g, det=det_local)
 
-          alpha_f_x(i,j,k) = a
-          beta_f_x(:,i,j,k) = b(:)
-          gamma_f_x(:,:,i,j,k) = g(:,:)
-          sqrt_gamma_f_x(i,j,k) = sqrt(det_local)
-        end do
+        alpha_f_x(i,j) = a
+        beta_f_x(:,i,j) = b(:)
+        gamma_f_x(:,:,i,j) = g(:,:)
+        sqrt_gamma_f_x(i,j) = sqrt(det_local)
       end do
     end do
     !$OMP END PARALLEL DO
@@ -353,25 +349,23 @@ contains
     ! 3. MÉTRICA EN LAS INTERFACES Y
     ! ========================================================
     if (ny > 1) then
-      !$OMP PARALLEL DO PRIVATE(i, j, k, a, b, g, det_local) COLLAPSE(3)
-      do k = 1, nz
-        do j = 1, ny+1
-          do i = 1, nx
-            call calculate_metric(x(i), y_face(j-1), alpha=a, beta=b, gamma=g, det=det_local)
+      !$OMP PARALLEL DO PRIVATE(i, j, a, b, g, det_local) COLLAPSE(2)
+      do j = 1, ny+1
+        do i = 1, nx
+          call calculate_metric(x(i), y_face(j-1), alpha=a, beta=b, gamma=g, det=det_local)
 
-            alpha_f_y(i,j,k) = a
-            beta_f_y(:,i,j,k) = b(:)
-            gamma_f_y(:,:,i,j,k) = g(:,:)
-            if (is_polar_geometry(geom_type) .and. &
-                abs(sin(y_face(j-1))) <= 64.0d0*epsilon(1.0d0)) then
-              ! La cara polar colapsa a una línea: su elemento de área es cero.
-              ! Se fija exactamente para que el redondeo de sin(pi) no deje un
-              ! área espuria en el polo sur.
-              sqrt_gamma_f_y(i,j,k) = 0.0d0
-            else
-              sqrt_gamma_f_y(i,j,k) = sqrt(det_local)
-            end if
-          end do
+          alpha_f_y(i,j) = a
+          beta_f_y(:,i,j) = b(:)
+          gamma_f_y(:,:,i,j) = g(:,:)
+          if (is_polar_geometry(geom_type) .and. &
+              abs(sin(y_face(j-1))) <= 64.0d0*epsilon(1.0d0)) then
+            ! La cara polar colapsa a una línea: su elemento de área es cero.
+            ! Se fija exactamente para que el redondeo de sin(pi) no deje un
+            ! área espuria en el polo sur.
+            sqrt_gamma_f_y(i,j) = 0.0d0
+          else
+            sqrt_gamma_f_y(i,j) = sqrt(det_local)
+          end if
         end do
       end do
       !$OMP END PARALLEL DO
@@ -381,17 +375,15 @@ contains
     ! 4. MÉTRICA EN LAS INTERFACES Z
     ! ========================================================
     if (nz > 1) then
-      !$OMP PARALLEL DO PRIVATE(i, j, k, a, b, g, det_local) COLLAPSE(3)
-      do k = 1, nz+1
-        do j = 1, ny
-          do i = 1, nx
-            call calculate_metric(x(i), y(j), alpha=a, beta=b, gamma=g, det=det_local)
+      !$OMP PARALLEL DO PRIVATE(i, j, a, b, g, det_local) COLLAPSE(2)
+      do j = 1, ny
+        do i = 1, nx
+          call calculate_metric(x(i), y(j), alpha=a, beta=b, gamma=g, det=det_local)
 
-            alpha_f_z(i,j,k) = a
-            beta_f_z(:,i,j,k) = b(:)
-            gamma_f_z(:,:,i,j,k) = g(:,:)
-            sqrt_gamma_f_z(i,j,k) = sqrt(det_local)
-          end do
+          alpha_f_z(i,j) = a
+          beta_f_z(:,i,j) = b(:)
+          gamma_f_z(:,:,i,j) = g(:,:)
+          sqrt_gamma_f_z(i,j) = sqrt(det_local)
         end do
       end do
       !$OMP END PARALLEL DO

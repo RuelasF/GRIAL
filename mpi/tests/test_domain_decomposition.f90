@@ -187,8 +187,8 @@ contains
           centers(:,i,j,k)=cell_cache(i,j,k)
         end do
         do i=1,nx+1
-          faces_x(:,i,j,k)=[alpha_f_x(i,j,k),beta_f_x(:,i,j,k), &
-            reshape(gamma_f_x(:,:,i,j,k),[9]),sqrt_gamma_f_x(i,j,k)]
+          faces_x(:,i,j,k)=[alpha_f_x(i,j),beta_f_x(:,i,j), &
+            reshape(gamma_f_x(:,:,i,j),[9]),sqrt_gamma_f_x(i,j)]
         end do
       end do
     end do
@@ -197,8 +197,8 @@ contains
       do k=1,nz
         do j=1,ny+1
           do i=1,nx
-            faces_y(:,i,j,k)=[alpha_f_y(i,j,k),beta_f_y(:,i,j,k), &
-              reshape(gamma_f_y(:,:,i,j,k),[9]),sqrt_gamma_f_y(i,j,k)]
+            faces_y(:,i,j,k)=[alpha_f_y(i,j),beta_f_y(:,i,j), &
+              reshape(gamma_f_y(:,:,i,j),[9]),sqrt_gamma_f_y(i,j)]
           end do
         end do
       end do
@@ -208,8 +208,8 @@ contains
       do k=1,nz+1
         do j=1,ny
           do i=1,nx
-            faces_z(:,i,j,k)=[alpha_f_z(i,j,k),beta_f_z(:,i,j,k), &
-              reshape(gamma_f_z(:,:,i,j,k),[9]),sqrt_gamma_f_z(i,j,k)]
+            faces_z(:,i,j,k)=[alpha_f_z(i,j),beta_f_z(:,i,j), &
+              reshape(gamma_f_z(:,:,i,j),[9]),sqrt_gamma_f_z(i,j)]
           end do
         end do
       end do
@@ -295,8 +295,8 @@ contains
         end do
         do i=1,nx+1
           g=offset+i
-          call require(all([alpha_f_x(i,j,k),beta_f_x(:,i,j,k), &
-            reshape(gamma_f_x(:,:,i,j,k),[9]),sqrt_gamma_f_x(i,j,k)]==faces_x(:,g,j,k)),'x face cache')
+          call require(all([alpha_f_x(i,j),beta_f_x(:,i,j), &
+            reshape(gamma_f_x(:,:,i,j),[9]),sqrt_gamma_f_x(i,j)]==faces_x(:,g,j,k)),'x face cache')
         end do
       end do
     end do
@@ -304,8 +304,8 @@ contains
       do k=1,nz
         do j=1,ny+1
           do i=1,nx
-            call require(all([alpha_f_y(i,j,k),beta_f_y(:,i,j,k), &
-              reshape(gamma_f_y(:,:,i,j,k),[9]),sqrt_gamma_f_y(i,j,k)]==faces_y(:,offset+i,j,k)),'y face cache')
+            call require(all([alpha_f_y(i,j),beta_f_y(:,i,j), &
+              reshape(gamma_f_y(:,:,i,j),[9]),sqrt_gamma_f_y(i,j)]==faces_y(:,offset+i,j,k)),'y face cache')
           end do
         end do
       end do
@@ -314,8 +314,8 @@ contains
       do k=1,nz+1
         do j=1,ny
           do i=1,nx
-            call require(all([alpha_f_z(i,j,k),beta_f_z(:,i,j,k), &
-              reshape(gamma_f_z(:,:,i,j,k),[9]),sqrt_gamma_f_z(i,j,k)]==faces_z(:,offset+i,j,k)),'z face cache')
+            call require(all([alpha_f_z(i,j),beta_f_z(:,i,j), &
+              reshape(gamma_f_z(:,:,i,j),[9]),sqrt_gamma_f_z(i,j)]==faces_z(:,offset+i,j,k)),'z face cache')
           end do
         end do
       end do
@@ -326,9 +326,9 @@ contains
   function cell_cache(i,j,k) result(values)
     integer, intent(in) :: i,j,k
     real*8 :: values(155)
-    values=[alpha_c(i,j,k),beta_c(:,i,j,k),reshape(gamma_c(:,:,i,j,k),[9]), &
-      reshape(gamma_inv_c(:,:,i,j,k),[9]),reshape(gmunu_c(:,:,i,j,k),[16]),sqrt_gamma_c(i,j,k), &
-      reshape(chris_c(:,:,:,i,j,k),[64]),reshape(dg_c(:,:,:,i,j,k),[48]),dlna_c(:,i,j,k)]
+    values=[alpha_c(i,j),beta_c(:,i,j),reshape(gamma_c(:,:,i,j),[9]), &
+      reshape(gamma_inv_c(:,:,i,j),[9]),reshape(gmunu_c(:,:,i,j),[16]),sqrt_gamma_c(i,j), &
+      reshape(chris_c(:,:,:,i,j),[64]),reshape(dg_c(:,:,:,i,j),[48]),dlna_c(:,i,j)]
   end function cell_cache
 
   subroutine fill_state(kind)

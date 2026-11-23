@@ -12,9 +12,9 @@ program test_cfl_cache
   nx=4;ny=1;nz=1;nx_global=4*parallel_size;ny_global=1;nz_global=1
   x_global_offset=4*parallel_rank;y_global_offset=0
   dx=0.5d0;dy=1.0d0;dz=1.0d0;CFL=0.4d0
-  allocate(alpha_c(nx,ny,nz),beta_c(3,nx,ny,nz),gamma_inv_c(3,3,nx,ny,nz))
+  allocate(alpha_c(nx,ny),beta_c(3,nx,ny),gamma_inv_c(3,3,nx,ny))
   alpha_c=1.0d0;beta_c=0.0d0;gamma_inv_c=0.0d0
-  gamma_inv_c(1,1,:,:,:)=1.0d0
+  gamma_inv_c(1,1,:,:)=1.0d0
   metric_cache_generation=metric_cache_generation+1_int64
   expected=0.2d0
   call check()
@@ -43,9 +43,9 @@ program test_cfl_cache
   end if
   deallocate(alpha_c,beta_c,gamma_inv_c)
   nx=5
-  allocate(alpha_c(nx,ny,nz),beta_c(3,nx,ny,nz),gamma_inv_c(3,3,nx,ny,nz))
+  allocate(alpha_c(nx,ny),beta_c(3,nx,ny),gamma_inv_c(3,3,nx,ny))
   alpha_c=1.0d0;beta_c=0.0d0;gamma_inv_c=0.0d0
-  gamma_inv_c(1,1,:,:,:)=1.0d0
+  gamma_inv_c(1,1,:,:)=1.0d0
   expected=0.05d0;call check()
   print *, 'CFL CACHE CHECKS PASSED rank=',parallel_rank
   call parallel_finalize()

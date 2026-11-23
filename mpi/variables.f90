@@ -82,37 +82,35 @@ module variables
     ! ==========================================================
     ! ARREGLOS DE MÉTRICA PRE-CALCULADA (CACHÉ 3+1)
     ! ==========================================================
+    ! La geometría estacionaria depende sólo de x e y.
     ! 1. Evaluados en los CENTROS celulares (Para fuentes y conversión U -> P)
-    real*8, allocatable :: alpha_c(:,:,:)           ! Lapse function
-    real*8, allocatable :: beta_c(:,:,:,:)          ! Shift vector [1:3, x, y, z]
-    real*8, allocatable :: gamma_c(:,:,:,:,:)       ! Métrica espacial [1:3, 1:3, x, y, z]
-    real*8, allocatable :: gamma_inv_c(:,:,:,:,:)   ! Inversa métrica espacial [1:3, 1:3, x, y, z]
-    real*8, allocatable :: gmunu_c(:,:,:,:,:)       ! Inversa métrica espacio-temporal
-    real*8, allocatable :: sqrt_gamma_c(:,:,:)      ! Raíz del determinante
-    real*8, allocatable :: chris_c(:,:,:,:,:,:)     ! Símbolos de Christoffel (0:3, 0:3, 0:3, x, y, z)
-    real*8, allocatable :: dg_c(:,:,:,:,:,:)        ! Derivadas de la métrica (0:3, 0:3, 1:3, x, y, z)
-    real*8, allocatable :: dlna_c(:,:,:,:)          ! Derivada del logaritmo del lapso (0:3, x, y, z)
+    real*8, allocatable :: alpha_c(:,:)           ! Lapse function
+    real*8, allocatable :: beta_c(:,:,:)          ! Shift vector [1:3, x, y]
+    real*8, allocatable :: gamma_c(:,:,:,:)       ! Métrica espacial [1:3, 1:3, x, y]
+    real*8, allocatable :: gamma_inv_c(:,:,:,:)   ! Inversa métrica espacial [1:3, 1:3, x, y]
+    real*8, allocatable :: gmunu_c(:,:,:,:)       ! Inversa métrica espacio-temporal
+    real*8, allocatable :: sqrt_gamma_c(:,:)      ! Raíz del determinante
+    real*8, allocatable :: chris_c(:,:,:,:,:)     ! Símbolos de Christoffel (0:3, 0:3, 0:3, x, y)
+    real*8, allocatable :: dg_c(:,:,:,:,:)        ! Derivadas de la métrica (0:3, 0:3, 1:3, x, y)
+    real*8, allocatable :: dlna_c(:,:,:)          ! Derivada del logaritmo del lapso (0:3, x, y)
 
     ! 2. Evaluados en las INTERFACES X (Para flujos F^x)
-    real*8, allocatable :: alpha_f_x(:,:,:)
-    real*8, allocatable :: beta_f_x(:,:,:,:)
-    real*8, allocatable :: gamma_f_x(:,:,:,:,:)
-    real*8, allocatable :: gmunu_f_x(:,:,:,:,:)
-    real*8, allocatable :: sqrt_gamma_f_x(:,:,:)
+    real*8, allocatable :: alpha_f_x(:,:)
+    real*8, allocatable :: beta_f_x(:,:,:)
+    real*8, allocatable :: gamma_f_x(:,:,:,:)
+    real*8, allocatable :: sqrt_gamma_f_x(:,:)
 
     ! 3. Evaluados en las INTERFACES Y (Para flujos F^y)
-    real*8, allocatable :: alpha_f_y(:,:,:)
-    real*8, allocatable :: beta_f_y(:,:,:,:)
-    real*8, allocatable :: gamma_f_y(:,:,:,:,:)
-    real*8, allocatable :: gmunu_f_y(:,:,:,:,:)
-    real*8, allocatable :: sqrt_gamma_f_y(:,:,:)
+    real*8, allocatable :: alpha_f_y(:,:)
+    real*8, allocatable :: beta_f_y(:,:,:)
+    real*8, allocatable :: gamma_f_y(:,:,:,:)
+    real*8, allocatable :: sqrt_gamma_f_y(:,:)
 
     ! 4. Evaluados en las INTERFACES Z (Para flujos F^z)
-    real*8, allocatable :: alpha_f_z(:,:,:)
-    real*8, allocatable :: beta_f_z(:,:,:,:)
-    real*8, allocatable :: gamma_f_z(:,:,:,:,:)
-    real*8, allocatable :: gmunu_f_z(:,:,:,:,:)
-    real*8, allocatable :: sqrt_gamma_f_z(:,:,:)
+    real*8, allocatable :: alpha_f_z(:,:)
+    real*8, allocatable :: beta_f_z(:,:,:)
+    real*8, allocatable :: gamma_f_z(:,:,:,:)
+    real*8, allocatable :: sqrt_gamma_f_z(:,:)
 
     ! ==========================================================
     ! DIRECCIONES DE BARRIDO (Dimensional Splitting)

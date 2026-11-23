@@ -263,7 +263,7 @@ contains
       all(layout%offset(1:2)==[x_global_offset,y_global_offset])
     call parallel_require_collective(valid,'diagnostic layout does not match the allocated grid')
     valid=allocated(up).and.allocated(p).and.allocated(gamma_c)
-    if (valid) valid=all(shape(up)==[nx,ny,nz,neq]).and.all(shape(gamma_c)==[3,3,nx,ny,nz]).and. &
+    if (valid) valid=all(shape(up)==[nx,ny,nz,neq]).and.all(shape(gamma_c)==[3,3,nx,ny]).and. &
       all(shape(p)==[nx+2*nghost+1,ny+2*nghost+1,nz+2*nghost+1,neq])
     call parallel_require_collective(valid,'diagnostic state or metric arrays do not match the grid')
     metadata=[dx,dy,dz,rho_floor,p_floor]
@@ -536,7 +536,7 @@ contains
           rho=p(i,j,k,eq_de);pres=p(i,j,k,eq_pr);v2=0.0d0
           do a=1,3
             do b=1,3
-              v2=v2+gamma_c(a,b,i,j,k)*p(i,j,k,eq_vx+a-1)*p(i,j,k,eq_vx+b-1)
+              v2=v2+gamma_c(a,b,i,j)*p(i,j,k,eq_vx+a-1)*p(i,j,k,eq_vx+b-1)
             end do
           end do
           minimum=min(minimum,[rho,pres]);maximum(1:3)=max(maximum(1:3),[rho,pres,v2])

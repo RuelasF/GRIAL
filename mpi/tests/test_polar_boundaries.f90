@@ -18,7 +18,7 @@ program test_polar_boundaries
 
   allocate(q(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq))
   allocate(q_acc(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq))
-  allocate(alpha_c(nx,ny,nz), beta_c(3,nx,ny,nz))
+  allocate(alpha_c(nx,ny), beta_c(3,nx,ny))
   alpha_c = 1.0d0
   beta_c = 0.0d0
   call fill_interior(q)
@@ -42,7 +42,7 @@ program test_polar_boundaries
   case_id = 11
   allocate(q(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq))
   allocate(q_acc(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq))
-  allocate(alpha_c(nx,ny,nz), beta_c(3,nx,ny,nz))
+  allocate(alpha_c(nx,ny), beta_c(3,nx,ny))
   alpha_c = 1.0d0
   beta_c = 0.0d0
   call fill_interior(q)

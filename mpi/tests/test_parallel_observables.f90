@@ -191,17 +191,17 @@ contains
         if (r<horizon)rho_base=1
       end if
       vr=-0.004d0
-      p(i,j,1,eq_vx:eq_vz)=beta_c(:,i,j,1)/alpha_c(i,j,1)
-      p(i,j,1,eq_vx)=p(i,j,1,eq_vx)+vr/(radial_jac*alpha_c(i,j,1))
-      p(i,j,1,eq_vz)=p(i,j,1,eq_vz)+omega/alpha_c(i,j,1)
+      p(i,j,1,eq_vx:eq_vz)=beta_c(:,i,j)/alpha_c(i,j)
+      p(i,j,1,eq_vx)=p(i,j,1,eq_vx)+vr/(radial_jac*alpha_c(i,j))
+      p(i,j,1,eq_vz)=p(i,j,1,eq_vz)+omega/alpha_c(i,j)
       ! Use a causal Eulerian rest state in the strong-field interior.
       if (r<=3.0d0)then
-        p(i,j,1,eq_vx:eq_vz)=0.0d0;vr=-beta_c(1,i,j,1)*radial_jac
+        p(i,j,1,eq_vx:eq_vz)=0.0d0;vr=-beta_c(1,i,j)*radial_jac
       end if
-      v2=dot_product(p(i,j,1,eq_vx:eq_vz),matmul(gamma_c(:,:,i,j,1),p(i,j,1,eq_vx:eq_vz)))
+      v2=dot_product(p(i,j,1,eq_vx:eq_vz),matmul(gamma_c(:,:,i,j),p(i,j,1,eq_vx:eq_vz)))
       call require(v2<1.and.v2>=0,'causal prescribed flow')
       lorentz=1/sqrt(1-v2)
-      weight=sqrt_gamma_c(i,j,1)*lorentz*dx*dy*2*pi
+      weight=sqrt_gamma_c(i,j)*lorentz*dx*dy*2*pi
       if (rho_base>0)then
         base_mass=base_mass+rho_base*weight
         disk_mass=disk_mass+(rho_base+rho_floor)*weight

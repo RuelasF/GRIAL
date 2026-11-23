@@ -213,10 +213,10 @@ contains
             if (trim(geom_type)=='Cylindrical'.and.abs(x_face(i))<=64.0d0*epsilon(1.0d0)) then
               packet(:,2+rs,i,j,k)=0.0d0;computed=0.0d0
             else
-              call resolve_riemann_problem(ql(:,i),qr(:,i),DIR_X,alpha_f_x(i+1,j,k),beta_f_x(:,i+1,j,k), &
-                gamma_f_x(:,:,i+1,j,k),sqrt_gamma_f_x(i+1,j,k),packet(:,2+rs,i,j,k))
-              call resolve_riemann_problem(fl,fr,DIR_X,alpha_f_x(i+1,j,k),beta_f_x(:,i+1,j,k), &
-                gamma_f_x(:,:,i+1,j,k),sqrt_gamma_f_x(i+1,j,k),computed)
+              call resolve_riemann_problem(ql(:,i),qr(:,i),DIR_X,alpha_f_x(i+1,j),beta_f_x(:,i+1,j), &
+                gamma_f_x(:,:,i+1,j),sqrt_gamma_f_x(i+1,j),packet(:,2+rs,i,j,k))
+              call resolve_riemann_problem(fl,fr,DIR_X,alpha_f_x(i+1,j),beta_f_x(:,i+1,j), &
+                gamma_f_x(:,:,i+1,j),sqrt_gamma_f_x(i+1,j),computed)
             end if
             scale=max(1.0d0,maxval(abs(packet(:,2+rs,i,j,k))))
             error=maxval(abs(computed-packet(:,2+rs,i,j,k)))/scale

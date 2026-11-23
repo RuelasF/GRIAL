@@ -265,7 +265,7 @@ contains
     valid=allocated(up).and.allocated(u).and.allocated(p).and.allocated(gamma_c)
     if (valid) valid=all(shape(up)==[nx,ny,nz,neq]).and.all(shape(u)==[nx,ny,nz,neq]).and. &
       all(shape(p)==[nx+2*nghost+1,ny+2*nghost+1,nz+2*nghost+1,neq]).and. &
-      all(shape(gamma_c)==[3,3,nx,ny,nz])
+      all(shape(gamma_c)==[3,3,nx,ny])
     call parallel_require_collective(valid,'checkpoint arrays or metric cache are not prepared')
     call parallel_require_collective(.not.accelerator_enabled.and..not.is_mhd,'checkpoint supports CPU hydrodynamics only')
     valid=all(ieee_is_finite([integration_time,dt,adb_idx,g1]))
@@ -295,7 +295,7 @@ contains
       do j=1,ny
         do i=1,nx
           velocity=primitives(i,j,k,eq_vx:eq_vz)
-          vsq=dot_product(velocity,matmul(gamma_c(:,:,i,j,k),velocity))
+          vsq=dot_product(velocity,matmul(gamma_c(:,:,i,j),velocity))
           valid=valid.and.ieee_is_finite(vsq)
           if (ieee_is_finite(vsq)) valid=valid.and.vsq>=0.0d0.and.vsq<1.0d0
         end do

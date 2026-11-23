@@ -41,8 +41,8 @@ contains
     integer :: ii, jj
 
     ! 1. LEER MÉTRICA DE LA CACHÉ
-    g(:,:) = gamma_c(:,:,i,j,k)
-    sqg    = sqrt_gamma_c(i,j,k)
+    g(:,:) = gamma_c(:,:,i,j)
+    sqg    = sqrt_gamma_c(i,j)
 
     v(1) = prim_state(eq_vx)
     v(2) = prim_state(eq_vy)
@@ -121,9 +121,9 @@ contains
 #endif
 
     ! 1. LEER MÉTRICA DE LA CACHÉ
-    g(:,:)    = gamma_c(:,:,i,j,k)
-    ginv(:,:) = gamma_inv_c(:,:,i,j,k)
-    sqg       = sqrt_gamma_c(i,j,k)
+    g(:,:)    = gamma_c(:,:,i,j)
+    ginv(:,:) = gamma_inv_c(:,:,i,j)
+    sqg       = sqrt_gamma_c(i,j)
 
     local_D_floor   = rho_floor * sqg
     local_tau_floor = p_floor * (g1 - 1.0d0) * sqg
@@ -253,7 +253,7 @@ contains
     integer :: ii, jj
 
     ! Se lee la métrica inversa localmente desde la caché
-    ginv(:,:) = gamma_inv_c(:,:,i,j,k)
+    ginv(:,:) = gamma_inv_c(:,:,i,j)
     call eval_V_and_dV(W, cons_state, V, dV)
 
     ! Cuadrado del Momento Covariante generalizado (Q^2 = gamma^ij S_i S_j)
@@ -297,7 +297,7 @@ contains
       x2 = x2_in
     else
       ! --- COTA SUPERIOR DINÁMICA DE W ---
-      ginv_local(:,:) = gamma_inv_c(:,:,i,j,k)
+      ginv_local(:,:) = gamma_inv_c(:,:,i,j)
 
       S_sq_local = 0.0d0
       do ii = 1, 3
@@ -387,7 +387,7 @@ contains
     real*8 :: S_sq_local, W_max_guess, ginv_local(3,3)
 
     ! --- COTA SUPERIOR DINÁMICA DE W ---
-    ginv_local(:,:) = gamma_inv_c(:,:,i,j,k)
+    ginv_local(:,:) = gamma_inv_c(:,:,i,j)
 
     S_sq_local = 0.0d0
     do ii = 1, 3
@@ -556,11 +556,11 @@ contains
     if (flat_cartesian_sources) return
 
     ! 1. LEER TODO DE LA CACHÉ GLOBAL (Gravedad a coste computacional CERO)
-    alpha      = alpha_c(i,j,k)
-    sqg        = sqrt_gamma_c(i,j,k)
-    chris(:,:,:) = chris_c(:,:,:,i,j,k)
-    dg(:,:,:)    = dg_c(:,:,:,i,j,k)
-    dlna(:)      = dlna_c(:,i,j,k)
+    alpha      = alpha_c(i,j)
+    sqg        = sqrt_gamma_c(i,j)
+    chris(:,:,:) = chris_c(:,:,:,i,j)
+    dg(:,:,:)    = dg_c(:,:,:,i,j)
+    dlna(:)      = dlna_c(:,i,j)
 
     ! 2. EVALUAR LA MATERIA ON-THE-FLY
     call calculate_stress_energy_tensor(prim_state, i, j, k, T_mn)

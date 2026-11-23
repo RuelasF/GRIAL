@@ -91,10 +91,10 @@ contains
             if (trim(geom_type)=='Cylindrical'.and.abs(x_face(i))<=64.0d0*epsilon(1.0d0)) then
               overlap_flux(:,i,j,k)=0.0d0
             else
-              a=alpha_f_x(i+1,j,k)
-              b=beta_f_x(:,i+1,j,k)
-              g=gamma_f_x(:,:,i+1,j,k)
-              sqg=sqrt_gamma_f_x(i+1,j,k)
+              a=alpha_f_x(i+1,j)
+              b=beta_f_x(:,i+1,j)
+              g=gamma_f_x(:,:,i+1,j)
+              sqg=sqrt_gamma_f_x(i+1,j)
               call resolve_riemann_problem(left(:,i),right(:,i),DIR_X,a,b,g,sqg,overlap_flux(:,i,j,k))
             end if
           end do
@@ -133,10 +133,10 @@ contains
           if (is_polar_geometry(geom_type).and.abs(sin(y_face(j)))<=64.0d0*epsilon(1.0d0)) then
             overlap_polar_flux(:,j,i,k)=0.0d0
           else
-            a=alpha_f_y(i,j+1,k)
-            b=beta_f_y(:,i,j+1,k)
-            g=gamma_f_y(:,:,i,j+1,k)
-            sqg=sqrt_gamma_f_y(i,j+1,k)
+            a=alpha_f_y(i,j+1)
+            b=beta_f_y(:,i,j+1)
+            g=gamma_f_y(:,:,i,j+1)
+            sqg=sqrt_gamma_f_y(i,j+1)
             call resolve_riemann_problem(left(:,j),right(:,j),DIR_Y,a,b,g,sqg,overlap_polar_flux(:,j,i,k))
           end if
         end do
@@ -252,10 +252,10 @@ contains
             flux_strip(:,i) = 0.0d0
           else
             ! Leer de la caché de la interfaz X (índice de cara i -> caché i+1).
-            a    = alpha_f_x(i+1, j, k)
-            b(:) = beta_f_x(:, i+1, j, k)
-            g(:,:) = gamma_f_x(:, :, i+1, j, k)
-            sqg  = sqrt_gamma_f_x(i+1, j, k)
+            a    = alpha_f_x(i+1, j)
+            b(:) = beta_f_x(:, i+1, j)
+            g(:,:) = gamma_f_x(:, :, i+1, j)
+            sqg  = sqrt_gamma_f_x(i+1, j)
 
             call resolve_riemann_problem(q_L_strip(:,i), q_R_strip(:,i), &
                                          DIR_X, a, b, g, sqg, flux_strip(:,i))
@@ -362,10 +362,10 @@ contains
                 abs(sin(y_face(j))) <= 64.0d0*epsilon(1.0d0)) then
               flux_strip(:,j) = 0.0d0
             else
-              a      = alpha_f_y(i, j+1, k)
-              b(:)   = beta_f_y(:, i, j+1, k)
-              g(:,:) = gamma_f_y(:, :, i, j+1, k)
-              sqg    = sqrt_gamma_f_y(i, j+1, k)
+              a      = alpha_f_y(i, j+1)
+              b(:)   = beta_f_y(:, i, j+1)
+              g(:,:) = gamma_f_y(:, :, i, j+1)
+              sqg    = sqrt_gamma_f_y(i, j+1)
 
               call resolve_riemann_problem(q_L_strip(:,j), q_R_strip(:,j), &
                                            DIR_Y, a, b, g, sqg, flux_strip(:,j))
@@ -425,10 +425,10 @@ contains
 #endif
           ! C. Cálculo de Flujos
           do k = 0, nz
-            a    = alpha_f_z(i, j, k+1)
-            b(:) = beta_f_z(:, i, j, k+1)
-            g(:,:) = gamma_f_z(:, :, i, j, k+1)
-            sqg  = sqrt_gamma_f_z(i, j, k+1)
+            a    = alpha_f_z(i, j)
+            b(:) = beta_f_z(:, i, j)
+            g(:,:) = gamma_f_z(:, :, i, j)
+            sqg  = sqrt_gamma_f_z(i, j)
 
             call resolve_riemann_problem(q_L_strip(:,k), q_R_strip(:,k), DIR_Z, a, b, g, sqg, flux_strip(:,k))
           end do
@@ -549,10 +549,10 @@ contains
               q_left(m)=qlx(i,j,k,m)
               q_right(m)=qrx(i,j,k,m)
             end do
-            alpha=alpha_f_x(i+1,j,k)
-            beta=beta_f_x(:,i+1,j,k)
-            g=gamma_f_x(:,:,i+1,j,k)
-            sqg=sqrt_gamma_f_x(i+1,j,k)
+            alpha=alpha_f_x(i+1,j)
+            beta=beta_f_x(:,i+1,j)
+            g=gamma_f_x(:,:,i+1,j)
+            sqg=sqrt_gamma_f_x(i+1,j)
             call resolve_riemann_problem(q_left,q_right,DIR_X,alpha,beta,g,sqg,flux_local)
           end if
           do m=1,neq
@@ -623,10 +623,10 @@ contains
                 q_left(m)=qly(i,j,k,m)
                 q_right(m)=qry(i,j,k,m)
               end do
-              alpha=alpha_f_y(i,j+1,k)
-              beta=beta_f_y(:,i,j+1,k)
-              g=gamma_f_y(:,:,i,j+1,k)
-              sqg=sqrt_gamma_f_y(i,j+1,k)
+              alpha=alpha_f_y(i,j+1)
+              beta=beta_f_y(:,i,j+1)
+              g=gamma_f_y(:,:,i,j+1)
+              sqg=sqrt_gamma_f_y(i,j+1)
               call resolve_riemann_problem(q_left,q_right,DIR_Y,alpha,beta,g,sqg,flux_local)
             end if
             do m=1,neq
@@ -689,10 +689,10 @@ contains
               q_left(m)=qlz(i,j,k,m)
               q_right(m)=qrz(i,j,k,m)
             end do
-            alpha=alpha_f_z(i,j,k+1)
-            beta=beta_f_z(:,i,j,k+1)
-            g=gamma_f_z(:,:,i,j,k+1)
-            sqg=sqrt_gamma_f_z(i,j,k+1)
+            alpha=alpha_f_z(i,j)
+            beta=beta_f_z(:,i,j)
+            g=gamma_f_z(:,:,i,j)
+            sqg=sqrt_gamma_f_z(i,j)
             call resolve_riemann_problem(q_left,q_right,DIR_Z,alpha,beta,g,sqg,flux_local)
             do m=1,neq
               fluxz(i,j,k,m)=flux_local(m)
@@ -737,8 +737,8 @@ contains
     cache_layout=[nx,ny,nz,nx_global,ny_global,nz_global,x_global_offset,y_global_offset]
     cache_parameters=[dx,dy,dz,CFL]
     cache_ok=allocated(alpha_c).and.allocated(beta_c).and.allocated(gamma_inv_c)
-    if (cache_ok) cache_ok=all(shape(alpha_c)==[nx,ny,nz]).and. &
-      all(shape(beta_c)==[3,nx,ny,nz]).and.all(shape(gamma_inv_c)==[3,3,nx,ny,nz])
+    if (cache_ok) cache_ok=all(shape(alpha_c)==[nx,ny]).and. &
+      all(shape(beta_c)==[3,nx,ny]).and.all(shape(gamma_inv_c)==[3,3,nx,ny])
     refresh_cache=.true.
     if (all(ieee_is_finite(cache_parameters))) then
       refresh_cache=.not.cache_ok.or..not.causal_cache_ready.or.metric_cache_generation/=causal_cache_generation.or. &
@@ -763,8 +763,8 @@ contains
     if (ny_global>0) active_y=ny_global>1
     if (nz_global>0) active_z=nz_global>1
     cache_ok=allocated(alpha_c).and.allocated(beta_c).and.allocated(gamma_inv_c)
-    if (cache_ok) cache_ok=all(shape(alpha_c)==[nx,ny,nz]).and. &
-      all(shape(beta_c)==[3,nx,ny,nz]).and.all(shape(gamma_inv_c)==[3,3,nx,ny,nz])
+    if (cache_ok) cache_ok=all(shape(alpha_c)==[nx,ny]).and. &
+      all(shape(beta_c)==[3,nx,ny]).and.all(shape(gamma_inv_c)==[3,3,nx,ny])
     call validate_cfl_context([dx,dy,dz],[.true.,active_y,active_z],CFL,cache_ok)
 
     ! Cotas causales máximas en cada dirección. El cono de luz es una cota
@@ -779,9 +779,9 @@ contains
         do i = 1, nx
 
           ! Leer métrica INVERSA (contravariante) en el centro de la celda
-          alpha    = alpha_c(i,j,k)
-          beta(:)  = beta_c(:,i,j,k)
-          ginv(:,:) = gamma_inv_c(:,:,i,j,k) ! gamma^ij
+          alpha    = alpha_c(i,j)
+          beta(:)  = beta_c(:,i,j)
+          ginv(:,:) = gamma_inv_c(:,:,i,j) ! gamma^ij
 
           ! Stage finite/positive checks: Fortran logical expressions need not short-circuit.
           if (.not.ieee_is_finite(alpha).or..not.all(ieee_is_finite(beta)).or. &

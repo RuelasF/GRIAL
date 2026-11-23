@@ -48,13 +48,13 @@ contains
     dy = dy_in
     dz = dz_in
 
-    allocate(alpha_c(nx,ny,nz), beta_c(3,nx,ny,nz), gamma_inv_c(3,3,nx,ny,nz))
+    allocate(alpha_c(nx,ny), beta_c(3,nx,ny), gamma_inv_c(3,3,nx,ny))
     alpha_c = lapse
     beta_c = 0.0d0
     gamma_inv_c = 0.0d0
     do direction = 1, 3
-      beta_c(direction,:,:,:) = shift(direction)
-      gamma_inv_c(direction,direction,:,:,:) = inverse_diagonal(direction)
+      beta_c(direction,:,:) = shift(direction)
+      gamma_inv_c(direction,direction,:,:) = inverse_diagonal(direction)
     end do
 
     call update_adaptive_dt()

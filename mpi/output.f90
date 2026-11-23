@@ -809,7 +809,7 @@ contains
     do k = 1, nz
       do j = 1, ny
         do i = 1, nx
-          var_buffer(i, j, k) = alpha_c(i, j, k)
+          var_buffer(i, j, k) = alpha_c(i, j)
         end do
       end do
     end do
@@ -821,7 +821,7 @@ contains
     do k = 1, nz
       do j = 1, ny
         do i = 1, nx
-          var_buffer(i, j, k) = beta_c(1, i, j, k)
+          var_buffer(i, j, k) = beta_c(1, i, j)
           if (use_log_r) var_buffer(i, j, k) = var_buffer(i, j, k) * exp(x(i))
         end do
       end do
@@ -1670,8 +1670,8 @@ contains
           end if
           if (rho <= 0.0d0 .and. pres <= 0.0d0) cycle
 
-          alpha = alpha_c(i,j,k)
-          beta = beta_c(:,i,j,k)
+          alpha = alpha_c(i,j)
+          beta = beta_c(:,i,j)
           eulerian_velocity = p(i,j,k,eq_vx:eq_vz)
           call gw_cartesian_kinematics(r, th, phi, geometry_spin, alpha, beta, &
                                        eulerian_velocity, use_log_r, position, &
@@ -1744,8 +1744,8 @@ contains
     do k = 1, nz
       do j = 1, ny
         ! call calculate_metric(x(idx_probe), y(j), alpha=alpha, beta=beta)
-        alpha = alpha_c(idx_probe, j, k)
-        beta(:) = beta_c(:, idx_probe, j, k)
+        alpha = alpha_c(idx_probe, j)
+        beta(:) = beta_c(:, idx_probe, j)
 
         v_eff = alpha * p(idx_probe,j,k,eq_vx) - beta(1)
 
@@ -1874,7 +1874,7 @@ contains
           v_sq = 0.0d0
           do ii = 1, 3
             do jj = 1, 3
-              v_sq = v_sq + gamma_c(ii, jj, i, j, k) * &
+              v_sq = v_sq + gamma_c(ii, jj, i, j) * &
                      p(i,j,k,eq_vx + ii - 1) * p(i,j,k,eq_vx + jj - 1)
             end do
           end do

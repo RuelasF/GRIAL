@@ -67,20 +67,20 @@ contains
     dx=0.5d0;dy=0.25d0;dz=0.125d0;CFL=0.4d0
     if (dim==1) dy=0.0d0
     if (dim<=2) dz=0.0d0
-    allocate(alpha_c(nx,ny,nz),beta_c(3,nx,ny,nz),gamma_inv_c(3,3,nx,ny,nz))
+    allocate(alpha_c(nx,ny),beta_c(3,nx,ny),gamma_inv_c(3,3,nx,ny))
     alpha_c=1.0d0;beta_c=0.0d0;gamma_inv_c=0.0d0
     if (shifted) then
       alpha_c=0.8d0
-      beta_c(1,:,:,:)=0.1d0;beta_c(2,:,:,:)=-0.2d0;beta_c(3,:,:,:)=0.05d0
+      beta_c(1,:,:)=0.1d0;beta_c(2,:,:)=-0.2d0;beta_c(3,:,:)=0.05d0
     end if
     do k=1,nz;do j=1,ny;do i=1,nx
       do d=1,3
-        gamma_inv_c(d,d,i,j,k)=1.0d0
+        gamma_inv_c(d,d,i,j)=1.0d0
       end do
       global_i=x_global_offset+i
-      if (global_i==1) gamma_inv_c(1,1,i,j,k)=100.0d0
-      if (global_i==37) gamma_inv_c(2,2,i,j,k)=400.0d0
-      if (global_i==19) gamma_inv_c(3,3,i,j,k)=900.0d0
+      if (global_i==1) gamma_inv_c(1,1,i,j)=100.0d0
+      if (global_i==37) gamma_inv_c(2,2,i,j)=400.0d0
+      if (global_i==19) gamma_inv_c(3,3,i,j)=900.0d0
     end do;end do;end do
     ! Synthetic geometry writes bypass precalculate_metric_cache. Publish their generation.
     metric_cache_generation=metric_cache_generation+1_int64
@@ -110,7 +110,7 @@ contains
     local_maxima=0.0d0
     do k=1,nz;do j=1,ny;do i=1,nx
       do d=1,3
-        if (axes(d)) local_maxima(d)=max(local_maxima(d),alpha_c(i,j,k)*sqrt(gamma_inv_c(d,d,i,j,k))+abs(beta_c(d,i,j,k)))
+        if (axes(d)) local_maxima(d)=max(local_maxima(d),alpha_c(i,j)*sqrt(gamma_inv_c(d,d,i,j))+abs(beta_c(d,i,j)))
       end do
     end do;end do;end do
     wrong=cfl_step_from_maxima(local_maxima,[dx,dy,dz],axes,CFL)
@@ -261,12 +261,12 @@ contains
         case('cfl-courant');CFL=0.3d0
         case('cfl-nan-courant');CFL=nan
         case('cfl-axis');ny_global=1
-        case('cfl-nan-metric');alpha_c(1,1,1)=nan
-        case('cfl-lapse');alpha_c(1,1,1)=0.0d0
-        case('cfl-inverse');gamma_inv_c(1,1,1,1,1)=-1.0d0
-        case('cfl-shift');beta_c(1,1,1,1)=ieee_value(0.0d0,ieee_positive_inf)
+        case('cfl-nan-metric');alpha_c(1,1)=nan
+        case('cfl-lapse');alpha_c(1,1)=0.0d0
+        case('cfl-inverse');gamma_inv_c(1,1,1,1)=-1.0d0
+        case('cfl-shift');beta_c(1,1,1)=ieee_value(0.0d0,ieee_positive_inf)
         case('cfl-cache');deallocate(alpha_c)
-        case('cfl-shape');deallocate(beta_c);allocate(beta_c(2,nx,ny,nz));beta_c=0.0d0
+        case('cfl-shape');deallocate(beta_c);allocate(beta_c(2,nx,ny));beta_c=0.0d0
         end select
       end if
       if (trim(mode)=='cfl-thread') then

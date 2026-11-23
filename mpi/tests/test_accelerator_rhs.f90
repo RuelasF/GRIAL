@@ -18,16 +18,16 @@ program test_accelerator_rhs
   allocate(p(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq))
   allocate(rhs_cpu(nx,ny,nz,neq),rhs_acc(nx,ny,nz,neq))
   allocate(x_face(0:nx),y_face(0:ny),z_face(0:nz))
-  allocate(alpha_c(nx,ny,nz),beta_c(3,nx,ny,nz),gamma_c(3,3,nx,ny,nz))
-  allocate(gamma_inv_c(3,3,nx,ny,nz),gmunu_c(0:3,0:3,nx,ny,nz))
-  allocate(sqrt_gamma_c(nx,ny,nz),chris_c(0:3,0:3,0:3,nx,ny,nz))
-  allocate(dg_c(0:3,0:3,1:3,nx,ny,nz),dlna_c(0:3,nx,ny,nz))
-  allocate(alpha_f_x(nx+1,ny,nz),beta_f_x(3,nx+1,ny,nz))
-  allocate(gamma_f_x(3,3,nx+1,ny,nz),sqrt_gamma_f_x(nx+1,ny,nz))
-  allocate(alpha_f_y(nx,ny+1,nz),beta_f_y(3,nx,ny+1,nz))
-  allocate(gamma_f_y(3,3,nx,ny+1,nz),sqrt_gamma_f_y(nx,ny+1,nz))
-  allocate(alpha_f_z(nx,ny,nz+1),beta_f_z(3,nx,ny,nz+1))
-  allocate(gamma_f_z(3,3,nx,ny,nz+1),sqrt_gamma_f_z(nx,ny,nz+1))
+  allocate(alpha_c(nx,ny),beta_c(3,nx,ny),gamma_c(3,3,nx,ny))
+  allocate(gamma_inv_c(3,3,nx,ny),gmunu_c(0:3,0:3,nx,ny))
+  allocate(sqrt_gamma_c(nx,ny),chris_c(0:3,0:3,0:3,nx,ny))
+  allocate(dg_c(0:3,0:3,1:3,nx,ny),dlna_c(0:3,nx,ny))
+  allocate(alpha_f_x(nx+1,ny),beta_f_x(3,nx+1,ny))
+  allocate(gamma_f_x(3,3,nx+1,ny),sqrt_gamma_f_x(nx+1,ny))
+  allocate(alpha_f_y(nx,ny+1),beta_f_y(3,nx,ny+1))
+  allocate(gamma_f_y(3,3,nx,ny+1),sqrt_gamma_f_y(nx,ny+1))
+  allocate(alpha_f_z(nx,ny),beta_f_z(3,nx,ny))
+  allocate(gamma_f_z(3,3,nx,ny),sqrt_gamma_f_z(nx,ny))
 
   alpha_c=1.0d0; beta_c=0.0d0; gamma_c=0.0d0; gamma_inv_c=0.0d0
   gmunu_c=0.0d0; sqrt_gamma_c=1.0d0; chris_c=0.0d0; dg_c=0.0d0; dlna_c=0.0d0
@@ -35,9 +35,9 @@ program test_accelerator_rhs
   alpha_f_y=1.0d0; beta_f_y=0.0d0; gamma_f_y=0.0d0; sqrt_gamma_f_y=1.0d0
   alpha_f_z=1.0d0; beta_f_z=0.0d0; gamma_f_z=0.0d0; sqrt_gamma_f_z=1.0d0
   do m=1,3
-    gamma_c(m,m,:,:,:)=1.0d0; gamma_inv_c(m,m,:,:,:)=1.0d0
-    gamma_f_x(m,m,:,:,:)=1.0d0; gamma_f_z(m,m,:,:,:)=1.0d0
-    gamma_f_y(m,m,:,:,:)=1.0d0
+    gamma_c(m,m,:,:)=1.0d0; gamma_inv_c(m,m,:,:)=1.0d0
+    gamma_f_x(m,m,:,:)=1.0d0; gamma_f_z(m,m,:,:)=1.0d0
+    gamma_f_y(m,m,:,:)=1.0d0
   end do
   do i=0,nx; x_face(i)=dble(i)*dx; end do
   do j=0,ny; y_face(j)=dble(j)*dy; end do

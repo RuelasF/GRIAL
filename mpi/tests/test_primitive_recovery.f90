@@ -27,7 +27,7 @@ program test_primitive_recovery
   do_numerical_diagnostics=.true.
   numerical_events=0_int64
   numerical_delta_u=0.0d0
-  allocate(gamma_c(3,3,1,1,1),gamma_inv_c(3,3,1,1,1),sqrt_gamma_c(1,1,1))
+  allocate(gamma_c(3,3,1,1),gamma_inv_c(3,3,1,1),sqrt_gamma_c(1,1))
   call get_command_argument(1,report_path)
   report=len_trim(report_path)>0
   if (report) then
@@ -47,8 +47,8 @@ program test_primitive_recovery
     gamma_c=0.0d0
     gamma_inv_c=0.0d0
     do component=1,3
-      gamma_c(component,component,1,1,1)=metric_scale(component)**2
-      gamma_inv_c(component,component,1,1,1)=1.0d0/metric_scale(component)**2
+      gamma_c(component,component,1,1)=metric_scale(component)**2
+      gamma_inv_c(component,component,1,1)=1.0d0/metric_scale(component)**2
     end do
     sqrt_gamma_c=product(metric_scale)
     do ig=1,size(gammas)
@@ -129,13 +129,13 @@ program test_primitive_recovery
   numerical_events=0_int64
   numerical_delta_u=0.0d0
   conserved=0.0d0
-  conserved(eq_de)=0.5d0*rho_floor*sqrt_gamma_c(1,1,1)
+  conserved(eq_de)=0.5d0*rho_floor*sqrt_gamma_c(1,1)
   before=conserved
   call cons_to_prim(conserved,recovered,1,1,1)
   if (numerical_events(NUM_C2P_LOW_D)/=1) error stop 'low-D repair missing'
   if (maxval(abs(numerical_delta_u-(conserved-before)))>1.0d-25) error stop 'repair delta mismatch'
   numerical_events=0_int64
-  conserved=(/1.0d0,1.0d0,100.0d0,0.0d0,0.0d0/)*sqrt_gamma_c(1,1,1)
+  conserved=(/1.0d0,1.0d0,100.0d0,0.0d0,0.0d0/)*sqrt_gamma_c(1,1)
   call cons_to_prim(conserved,recovered,1,1,1)
   if (numerical_events(NUM_C2P_MOMENTUM)/=1) error stop 'invalid momentum not repaired'
   if (.not.all(ieee_is_finite(recovered)).or.minval(recovered(1:2))<=0.0d0) error stop 'invalid repair output'
@@ -155,8 +155,8 @@ contains
     original=[1.0d0,0.2d0,0.1d0,-0.05d0,0.025d0]
     call prim_to_cons(original,initial,1,1,1)
     atmosphere=0.0d0
-    atmosphere(eq_de)=rho_floor*sqrt_gamma_c(1,1,1)
-    atmosphere(eq_pr)=p_floor*(g1-1.0d0)*sqrt_gamma_c(1,1,1)
+    atmosphere(eq_de)=rho_floor*sqrt_gamma_c(1,1)
+    atmosphere(eq_pr)=p_floor*(g1-1.0d0)*sqrt_gamma_c(1,1)
     do kind=1,size(invalid)
       do field=1,neq
         conserved=initial

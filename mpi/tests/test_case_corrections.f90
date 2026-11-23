@@ -273,7 +273,7 @@ contains
     ny = 1
     nz = 1
     allocate(q(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq))
-    allocate(alpha_c(nx,ny,nz), beta_c(3,nx,ny,nz))
+    allocate(alpha_c(nx,ny), beta_c(3,nx,ny))
     q = 0.0d0
     q(:,:,:,eq_de) = 1.0d0
     q(:,:,:,eq_pr) = 1.0d0
@@ -281,7 +281,7 @@ contains
     q(2,1,1,eq_vx) = 0.00d0
     alpha_c = 0.80d0
     beta_c = 0.0d0
-    beta_c(1,:,:,:) = 0.20d0
+    beta_c(1,:,:) = 0.20d0
     case_name = 'OffAxis'
 
     call set_boundary_conditions(q)

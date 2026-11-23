@@ -117,7 +117,7 @@ contains
     case('OffAxis','9','FontDaigneEqu','10','FontDaigneSag','11','FontDaigne3D','12', &
          'FishMoncEqu','13','FishMoncSag','14','FishMonc3D','15')
       cache_ok=allocated(alpha_c).and.allocated(beta_c)
-      if (cache_ok) cache_ok=all(shape(alpha_c)==[nx,ny,nz]).and.all(shape(beta_c)==[3,nx,ny,nz])
+      if (cache_ok) cache_ok=all(shape(alpha_c)==[nx,ny]).and.all(shape(beta_c)==[3,nx,ny])
     end select
     call parallel_require_collective(cache_ok,'radial physical boundaries require the local metric cache')
     injector_ok=.true.

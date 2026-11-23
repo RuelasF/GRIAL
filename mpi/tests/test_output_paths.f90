@@ -31,7 +31,7 @@ program test_output_paths
   allocate(x(-nghost:nx+nghost), y(-nghost:ny+nghost), z(-nghost:nz+nghost))
   allocate(x_face(0:nx), y_face(0:ny), z_face(0:nz))
   allocate(p(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq))
-  allocate(alpha_c(nx,ny,nz), beta_c(3,nx,ny,nz))
+  allocate(alpha_c(nx,ny), beta_c(3,nx,ny))
   allocate(var_names(neq))
 
   do i = -nghost, nx+nghost

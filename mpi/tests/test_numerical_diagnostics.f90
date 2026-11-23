@@ -54,13 +54,13 @@ program test_numerical_diagnostics
   if (numerical_events(NUM_FACE_RHO_FLOOR) /= 2*(nodes+1)) error stop 'face floor count'
   if (any(left(eq_de,:) /= rho_floor)) error stop 'floor behavior'
 
-  allocate(gamma_c(3,3,1,1,1),gamma_inv_c(3,3,1,1,1),sqrt_gamma_c(1,1,1))
+  allocate(gamma_c(3,3,1,1),gamma_inv_c(3,3,1,1),sqrt_gamma_c(1,1))
   g=0.0d0
   do i=1,3
     g(i,i)=1.0d0
   end do
-  gamma_c(:,:,1,1,1)=g
-  gamma_inv_c(:,:,1,1,1)=g
+  gamma_c(:,:,1,1)=g
+  gamma_inv_c(:,:,1,1)=g
   sqrt_gamma_c=1.0d0
   conservative=0.0d0
   conservative(eq_de)=0.5d0*rho_floor

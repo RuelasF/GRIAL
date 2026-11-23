@@ -27,7 +27,7 @@ program test_ppi_gw_diagnostics
   dy=pi;dz=2*pi/nz;omega=2*pi/256.0d0;growth=0.003d0
   output_folder=trim(folder);do_ppi_diagnostics=.true.;do_numerical_diagnostics=.false.
   allocate(x(nx),y(ny),z(nz),p(nx,ny,nz,neq),up(nx,ny,nz,neq))
-  allocate(alpha_c(nx,ny,nz),beta_c(3,nx,ny,nz),gamma_c(3,3,nx,ny,nz),sqrt_gamma_c(nx,ny,nz))
+  allocate(alpha_c(nx,ny),beta_c(3,nx,ny),gamma_c(3,3,nx,ny),sqrt_gamma_c(nx,ny))
   y=pi/2
   do k=1,nz
     z(k)=(k-0.5d0)*dz
@@ -52,10 +52,8 @@ program test_ppi_gw_diagnostics
         r=6.0d0+2*(i-1);radial_jac=1
         if(use_log_r) radial_jac=r
         call calculate_metric(x(i),y(1),alpha=alpha,beta=beta,gamma=g,det=determinant)
-        do k=1,nz
-          alpha_c(i,1,k)=alpha;beta_c(:,i,1,k)=beta;gamma_c(:,:,i,1,k)=g
-          sqrt_gamma_c(i,1,k)=sqrt(determinant)
-        end do
+        alpha_c(i,1)=alpha;beta_c(:,i,1)=beta;gamma_c(:,:,i,1)=g
+        sqrt_gamma_c(i,1)=sqrt(determinant)
         ! Independent equatorial KS formula for W and proper-volume weights.
         v_r=(2/r)/sqrt(1+2/r);v_phi=omega*sqrt(1+2/r)
         v_squared=(1+2/r)*v_r**2-2*a_spin*(1+2/r)*v_r*v_phi &
@@ -79,8 +77,8 @@ program test_ppi_gw_diagnostics
           r=6.0d0+2*(i-1);rho_base=exp(-((r-7)/2)**2)
           p(i,1,k,eq_de)=rho_base*(1+2*a1*cos(z(k)-phase1)+2*a2*cos(2*(z(k)-phase2)))+rho_floor
           p(i,1,k,eq_pr)=1.0d-3+p_floor
-          p(i,1,k,eq_vx:eq_vz)=beta_c(:,i,1,k)/alpha_c(i,1,k)
-          p(i,1,k,eq_vz)=p(i,1,k,eq_vz)+omega/alpha_c(i,1,k)
+          p(i,1,k,eq_vx:eq_vz)=beta_c(:,i,1)/alpha_c(i,1)
+          p(i,1,k,eq_vz)=p(i,1,k,eq_vz)+omega/alpha_c(i,1)
           call prim_to_cons(p(i,1,k,:),up(i,1,k,:),i,1,k)
         end do;end do
         call calc_ppi_modes(sample_time);call calc_gw_strain(sample_time)

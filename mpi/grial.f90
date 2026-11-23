@@ -452,7 +452,7 @@ program grial
   call finalize_accelerator()
 
   deallocate(x,y,z,var_names)
-  deallocate(u,up,s,rhs,p)
+  deallocate(u,up,rhs,p)
   deallocate(alpha_c,beta_c,gamma_c,gamma_inv_c,gmunu_c,sqrt_gamma_c,chris_c,dg_c,dlna_c)
 
   deallocate(alpha_f_x,beta_f_x,gamma_f_x,sqrt_gamma_f_x)

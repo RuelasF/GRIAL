@@ -222,7 +222,6 @@ contains
     ! -------------------------------------------------------------
     allocate(u(1:nx,1:ny,1:nz,neq))
     allocate(up(1:nx,1:ny,1:nz,neq))
-    allocate(s(1:nx,1:ny,1:nz,neq))
     allocate(rhs(1:nx,1:ny,1:nz,neq))
     allocate(p(-nghost:nx+nghost,-nghost:ny+nghost,-nghost:nz+nghost,neq))
 

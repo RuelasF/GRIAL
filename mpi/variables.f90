@@ -75,7 +75,6 @@ module variables
     ! ==========================================================
     real*8, allocatable :: u(:,:,:,:)       ! Estado conservativo paso 'n'
     real*8, allocatable :: up(:,:,:,:)      ! Estado intermedio/final paso 'n+1'
-    real*8, allocatable :: s(:,:,:,:)       ! Términos fuente
     real*8, allocatable :: rhs(:,:,:,:)     ! Lado Derecho (RHS)
     real*8, allocatable :: p(:,:,:,:)       ! Variables Primitivas
 

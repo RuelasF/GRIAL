@@ -251,6 +251,7 @@ contains
   end subroutine check_shared_face
 
   subroutine check_fixture()
+    real*8, allocatable :: accelerator_rhs(:,:,:,:)
     integer :: shape_global(3)
     logical :: periodic
     type(domain_layout) :: layout
@@ -276,6 +277,7 @@ contains
     nx=shape_global(1);ny=shape_global(2);nz=shape_global(3)
     call allocate_and_grid(layout);call precalculate_metric_cache()
     call seed_profile();call initialize_halo_exchange(layout);call fill_primitive_halos(p)
+    allocate(accelerator_rhs,mold=rhs)
     call initialize_rhs_accelerator(.true.)
     allocate(packet(neq,4,0:nx,ny,nz))
     do config=1,config_count
@@ -294,9 +296,9 @@ contains
         error=maxval(abs(rhs-reference_rhs(x_global_offset+1:x_global_offset+nx,:,:,:,solver,config)))
         rhs_error=max(rhs_error,error)
         call require(error==0.0d0,'local/full static RHS')
-        call calc_rhs_accelerator(p,s)
+        call calc_rhs_accelerator(p,accelerator_rhs)
         scale=max(1.0d0,maxval(abs(rhs)))
-        error=maxval(abs(rhs-s))/scale
+        error=maxval(abs(rhs-accelerator_rhs))/scale
         face_rhs_error=max(face_rhs_error,error)
         call require(error<=2.0d-13,'host face/strip static RHS')
       end do
@@ -321,7 +323,7 @@ contains
   end subroutine check_invalid_metadata
 
   subroutine release_grid()
-    deallocate(x,x_face,y,y_face,z,z_face,u,up,s,rhs,p)
+    deallocate(x,x_face,y,y_face,z,z_face,u,up,rhs,p)
     deallocate(alpha_c,beta_c,gamma_c,gamma_inv_c,gmunu_c,sqrt_gamma_c,chris_c,dg_c,dlna_c)
     deallocate(alpha_f_x,beta_f_x,gamma_f_x,sqrt_gamma_f_x)
     if (allocated(alpha_f_y)) deallocate(alpha_f_y,beta_f_y,gamma_f_y,sqrt_gamma_f_y)

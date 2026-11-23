@@ -412,7 +412,7 @@ contains
   end subroutine invalid_call
 
   subroutine release_grid()
-    deallocate(x,x_face,y,y_face,z,z_face,u,up,s,rhs,p)
+    deallocate(x,x_face,y,y_face,z,z_face,u,up,rhs,p)
     deallocate(alpha_c,beta_c,gamma_c,gamma_inv_c,gmunu_c,sqrt_gamma_c,chris_c,dg_c,dlna_c)
     deallocate(alpha_f_x,beta_f_x,gamma_f_x,sqrt_gamma_f_x)
     if (allocated(alpha_f_y)) deallocate(alpha_f_y,beta_f_y,gamma_f_y,sqrt_gamma_f_y)

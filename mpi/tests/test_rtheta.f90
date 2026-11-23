@@ -158,6 +158,7 @@ contains
   end subroutine evolve
 
   subroutine check_evolution()
+    real*8, allocatable :: accelerator_rhs(:,:,:,:)
     type(domain_layout) :: layout
     integer :: shape_global(3),reference_steps,local_steps,component
     logical :: periodic
@@ -188,9 +189,10 @@ contains
     up=initial_u(x_global_offset+1:x_global_offset+nx,y_global_offset+1:y_global_offset+ny,:,:)
     call initialize_halo_exchange(layout)
     call fill_primitive_halos(p)
+    allocate(accelerator_rhs,mold=rhs)
     call initialize_rhs_accelerator(.true.)
-    call calc_rhs_cpu(p,rhs);call calc_rhs_accelerator(p,s)
-    error=maxval(abs(rhs-s))/max(1.0d0,maxval(abs(rhs)))
+    call calc_rhs_cpu(p,rhs);call calc_rhs_accelerator(p,accelerator_rhs)
+    error=maxval(abs(rhs-accelerator_rhs))/max(1.0d0,maxval(abs(rhs)))
     host_error=max(host_error,error)
     call require(error<=2.0d-13,'host face/strip RHS with global polar indices')
     call finalize_rhs_accelerator(.true.)
@@ -439,7 +441,7 @@ contains
   end subroutine check_invalid_call
 
   subroutine release_grid()
-    deallocate(x,x_face,y,y_face,z,z_face,u,up,s,rhs,p)
+    deallocate(x,x_face,y,y_face,z,z_face,u,up,rhs,p)
     deallocate(alpha_c,beta_c,gamma_c,gamma_inv_c,gmunu_c,sqrt_gamma_c,chris_c,dg_c,dlna_c)
     deallocate(alpha_f_x,beta_f_x,gamma_f_x,sqrt_gamma_f_x)
     if (allocated(alpha_f_y)) deallocate(alpha_f_y,beta_f_y,gamma_f_y,sqrt_gamma_f_y)

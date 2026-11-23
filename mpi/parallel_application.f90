@@ -296,7 +296,7 @@ contains
     end do
 #ifdef GRIAL_PROFILE
     write(*,'(A,I0,1X,ES24.16E3)') 'GRIAL_LOOP rank=',parallel_rank,profile_clock()-loop_started
-    call profile_report()
+    call profile_report(root,start_step)
 #endif
     call sample_parallel_observer(calendar,.true.);call vtk_now();call checkpoint_now()
     reason='completed'

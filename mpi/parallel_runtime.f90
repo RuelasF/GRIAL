@@ -95,9 +95,12 @@ contains
     error stop "too many profiling labels"
   end subroutine profile_label_add
 
-  subroutine profile_report()
-    integer :: i,unit,ios
-    character(len=48) :: trace_path
+  subroutine profile_report(root,start_step)
+    character(len=*), intent(in) :: root
+    integer, intent(in) :: start_step
+    integer :: i,unit,ios,close_status
+    character(len=80) :: trace_name
+    character(len=:), allocatable :: trace_path
     character(len=16),parameter :: names(9)=[character(len=16) :: 'cfl','rhs','recovery','halos', &
       'observer','validate_mpi','reconstruct','riemann_loop','source_assembly']
     do i=1,9
@@ -110,15 +113,20 @@ contains
         trim(profile_labels(i)),profile_label_calls(i),profile_label_seconds(i)
     end do
     if (allocated(trace_site)) then
-      write(trace_path,'(A,I0,A)') 'grial_collectives_rank_',parallel_rank,'.tsv'
-      open(newunit=unit,file=trim(trace_path),status='new',action='write',iostat=ios)
-      if (ios/=0) call parallel_abort('cannot write collective profile '//trim(trace_path))
-      write(unit,'(A,L1)') '# truncated=',trace_truncated
-      do i=1,trace_count
-        write(unit,'(I0,A,ES24.16E3,A,ES24.16E3,2A)') i,achar(9),trace_enter(i),achar(9), &
-          trace_leave(i),achar(9),trim(profile_labels(trace_site(i)))
-      end do
-      close(unit)
+      write(trace_name,'(A,I0,A,I0,A)') 'grial_collectives_step_',start_step,'_rank_',parallel_rank,'.tsv'
+      trace_path=trim(root)//'/'//trim(trace_name)
+      open(newunit=unit,file=trace_path,status='new',action='write',iostat=ios)
+      if (ios==0) then
+        write(unit,'(A,L1)',iostat=ios) '# truncated=',trace_truncated
+        do i=1,trace_count
+          if (ios/=0) exit
+          write(unit,'(I0,A,ES24.16E3,A,ES24.16E3,2A)',iostat=ios) i,achar(9),trace_enter(i),achar(9), &
+            trace_leave(i),achar(9),trim(profile_labels(trace_site(i)))
+        end do
+        close(unit,iostat=close_status)
+        if (ios==0) ios=close_status
+      end if
+      if (ios/=0) write(error_unit,'(A,I0,2A)') 'Collective profile unavailable on rank ',parallel_rank,': ',trace_path
     end if
   end subroutine profile_report
 #endif

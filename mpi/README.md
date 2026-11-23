@@ -69,7 +69,10 @@ agrega el sufijo `_cfl_cache` al ejecutable. `PROFILE=1` construye el perfilador
 `grial_mpi_profile` y requiere `OVERLAP=0`.
 
 Con el perfilador activo, `GRIAL_COLLECTIVE_TRACE=1` escribe
-`grial_collectives_rank_*.tsv` en la carpeta de trabajo. Cada rango registra
+`grial_collectives_step_<inicio>_rank_<rango>.tsv` junto a los diagnósticos de
+la corrida. El nombre usa el paso inicial de la sesión. Si la traza ya existe
+o falla su escritura, el perfilador avisa y la simulación puede publicar su
+checkpoint final. Cada rango registra
 hasta 131072 llamadas con el sitio y las marcas de entrada y retorno.
 En un mismo host GNU/Linux se pueden comparar esas marcas entre rangos.
 El intervalo posterior a la última entrada también incluye el trabajo local

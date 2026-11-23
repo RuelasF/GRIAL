@@ -6,6 +6,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import struct
@@ -170,6 +171,12 @@ def main():
                 code, output = run(work, grid, mode, failed, success=fault=='returned')
                 if fault=='returned':
                     assert 'CHECKPOINT IO FAILURE PROBE PASSED' in output
+                    rank = math.prod(grid)-1
+                    block = failed/f'block_{rank:09}.bin'
+                    assert re.search(
+                        rf'CHECKPOINT I/O rank={rank} (write|close|verify) {re.escape(str(block))} iostat=-?\d+',
+                        output,
+                    ), output
                 else:
                     assert 'SIGXFSZ' in output or 'signal 25' in output
                 assert failed.exists() and not (failed/'COMMITTED').exists()

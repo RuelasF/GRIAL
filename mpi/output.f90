@@ -17,6 +17,7 @@ module output
   use parallel_diagnostics, only: state_diagnostics,conservation_balance,collect_global_state, &
     collect_conservation_balance,reduce_observable_sum,validate_observable_sample
   use parallel_runtime, only: parallel_rank,parallel_require_collective
+  use, intrinsic :: iso_fortran_env, only: error_unit
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   public :: save_vtk_at_time, save_checkpoint, read_checkpoint_metadata, &
@@ -948,45 +949,92 @@ contains
     real*8, intent(in) :: current_time
     integer, intent(out), optional :: status
     integer :: unit_file, io_status, close_status
-    character(len=512) :: file_name, temporary_name
+    character(len=512) :: file_name, temporary_name, message
+    character(len=24) :: operation
 
     if (present(status)) status = 0
     write(file_name, '(A, "/checkpoint_", A, "_step_", I9.9, ".rst")') &
       trim(output_folder), trim(scheme_name), step_num
     temporary_name=trim(file_name)//'.tmp'
     print *, '>>> Guardando Checkpoint de Respaldo: ', trim(file_name)
+    operation='open'
+    message=''
     open(newunit=unit_file, file=trim(temporary_name), status='replace', action='write', &
-      form='unformatted', iostat=io_status)
+      form='unformatted', iostat=io_status,iomsg=message)
     if (io_status /= 0) goto 900
+    operation='write metadata'
     call write_checkpoint_metadata(unit_file,io_status)
     if (io_status /= 0) goto 800
 
+    operation='write data'
     ! Estado temporal de la simulación
-    write(unit_file,iostat=io_status) current_time
+    write(unit_file,iostat=io_status,iomsg=message) current_time
     if (io_status /= 0) goto 800
-    write(unit_file,iostat=io_status) step_num
+    write(unit_file,iostat=io_status,iomsg=message) step_num
     if (io_status /= 0) goto 800
 
     ! Vuelco binario masivo del arreglo de estado conservado 4D
-    write(unit_file,iostat=io_status) up
+    write(unit_file,iostat=io_status,iomsg=message) up
     if (io_status /= 0) goto 800
-    write(unit_file,iostat=io_status) 'GRIAL_END_V9', step_num, current_time, nx, ny, nz, neq
+    write(unit_file,iostat=io_status,iomsg=message) 'GRIAL_END_V9', step_num, current_time, nx, ny, nz, neq
     if (io_status /= 0) goto 800
 800 continue
-    close(unit_file,iostat=close_status)
-    if (io_status == 0) io_status=close_status
+    if (io_status == 0) then
+      operation='close'
+      close(unit_file,iostat=io_status,iomsg=message)
+    else
+      close(unit_file,iostat=close_status)
+    end if
+    if (io_status /= 0) goto 900
+    operation='verify footer'
+    call verify_checkpoint_footer(trim(temporary_name),'GRIAL_END_V9',step_num,current_time,io_status,message)
     if (io_status /= 0) goto 900
     ! Same-directory rename publishes a complete generation; older steps survive.
+    operation='rename'
+    message=''
     call rename(trim(temporary_name),trim(file_name),io_status)
     if (io_status == 0) return
 900 continue
-    write(*,'(A,1X,A,1X,I0)') 'ERROR checkpoint not published:',trim(temporary_name),io_status
+    write(error_unit,'(5A,I0,2A)') 'ERROR checkpoint not published: ',trim(operation),' ', &
+      trim(temporary_name),' iostat=',io_status,' ',trim(message)
     if (present(status)) then
       status=io_status
     else
       error stop 1
     end if
   end subroutine save_checkpoint
+
+  subroutine verify_checkpoint_footer(path, expected_footer, step, time, io_status, message)
+    character(len=*), intent(in) :: path, expected_footer
+    integer, intent(in) :: step
+    real*8, intent(in) :: time
+    integer, intent(out) :: io_status
+    character(len=*), intent(out) :: message
+    integer :: unit_file, saved_step, saved_shape(4), close_status
+    real*8 :: saved_time
+    character(len=12) :: footer
+
+    ! Verify the final record from physical EOF. A forward sequential read
+    ! may accept a truncated trailing record marker with GNU Fortran.
+    message=''
+    open(newunit=unit_file,file=path,status='old',action='read', &
+      form='unformatted',position='append',iostat=io_status,iomsg=message)
+    if (io_status /= 0) return
+    backspace(unit_file,iostat=io_status,iomsg=message)
+    if (io_status == 0) read(unit_file,iostat=io_status,iomsg=message) footer,saved_step,saved_time,saved_shape
+    if (io_status == 0) then
+      if (footer/=expected_footer.or.saved_step/=step.or. &
+          transfer(saved_time,0_int64)/=transfer(time,0_int64).or.any(saved_shape/=[nx,ny,nz,neq])) then
+        io_status=1
+        message='checkpoint footer disagrees with written state'
+      end if
+    end if
+    if (io_status == 0) then
+      close(unit_file,iostat=io_status,iomsg=message)
+    else
+      close(unit_file,iostat=close_status)
+    end if
+  end subroutine verify_checkpoint_footer
 
   subroutine read_checkpoint_metadata(unit_file, status)
     integer, intent(in) :: unit_file
@@ -1198,6 +1246,8 @@ contains
     integer :: component, i, j, k, io_status, saved_step, dims(4)
     real*8 :: saved_time
     character(len=12) :: footer
+    character(len=1024) :: path
+    character(len=512) :: message
 
     read(unit_file,iostat=io_status) current_time
     if (io_status /= 0) error stop 'Incomplete checkpoint state'
@@ -1234,6 +1284,13 @@ contains
           any(dims /= [nx,ny,nz,neq])) error stop 'Inconsistent checkpoint footer'
       read(unit_file,iostat=io_status)
       if (io_status >= 0) error stop 'Unexpected checkpoint trailing record'
+      inquire(unit=unit_file,name=path,iostat=io_status)
+      if (io_status /= 0) error stop 'Cannot identify checkpoint file'
+      call verify_checkpoint_footer(trim(path),checkpoint_footer_magic,step_num,current_time,io_status,message)
+      if (io_status /= 0) then
+        write(error_unit,'(4A)') 'Invalid checkpoint footer: ',trim(path),' ',trim(message)
+        error stop 1
+      end if
     end if
   end subroutine read_checkpoint_state
 

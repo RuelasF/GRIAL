@@ -105,7 +105,7 @@ trap 'terminate_children HUP' HUP
 trap 'terminate_children INT' INT
 trap 'terminate_children TERM' TERM
 
-for command_name in awk sort find sha256sum nproc; do
+for command_name in awk sort find sha256sum nproc python3; do
   command -v "$command_name" >/dev/null 2>&1 || die "falta el comando requerido: $command_name"
 done
 
@@ -418,8 +418,77 @@ validate_parameter_files() {
 
 latest_checkpoint() {
   local label="$1"
-  find "$RESULT_ROOT/$label" -type f -name 'checkpoint_*.rst' -printf '%T@ %p\n' \
-    2>/dev/null | sort -n | tail -n 1 | awk '{print $2}'
+  case_properties "$label"
+  python3 - "$RESULT_ROOT/$label" "$CASE_SCHEME" <<'PY'
+import math
+from pathlib import Path
+import re
+import struct
+import sys
+
+
+def checked_step(path):
+    # The legacy campaign writes native-endian records with 32-bit markers.
+    marker = struct.Struct("=i")
+    with path.open("rb") as stream:
+        records = []
+        while True:
+            raw = stream.read(marker.size)
+            if not raw:
+                break
+            length, = marker.unpack(raw)
+            if length <= 0:
+                raise ValueError("invalid record length")
+            records.append((stream.tell(), length))
+            stream.seek(length, 1)
+            if marker.unpack(stream.read(marker.size))[0] != length:
+                raise ValueError("record markers disagree")
+
+        def read_record(index, length):
+            offset, actual = records[index]
+            if length != actual:
+                raise ValueError("unexpected record length")
+            stream.seek(offset)
+            return stream.read(length)
+
+        version = read_record(0, 12).strip()
+        if version not in {f"GRHDCP_V{n}".encode() for n in range(2, 10)}:
+            raise ValueError("unknown format")
+        halo, nx, ny, nz = struct.unpack("=4i", read_record(1, 16))
+        has_footer = version in (b"GRHDCP_V8", b"GRHDCP_V9")
+        payload = -2 if has_footer else -1
+        time, = struct.unpack("=d", read_record(payload - 2, 8))
+        step, = struct.unpack("=i", read_record(payload - 1, 4))
+        if min(halo, nx, ny, nz) < 1 or records[payload][1] != 8 * 5 * nx * ny * nz:
+            raise ValueError("invalid payload dimensions")
+        if step < 0 or not math.isfinite(time) or time < 0:
+            raise ValueError("invalid saved time or step")
+        if has_footer:
+            footer = struct.unpack("=12sid4i", read_record(-1, 40))
+            if footer != (b"GRIAL_END_V" + version[-1:], step, time, nx, ny, nz, 5):
+                raise ValueError("checkpoint footer disagrees with state")
+        return step
+
+
+root, scheme = Path(sys.argv[1]).resolve(), sys.argv[2]
+candidates = []
+for path in root.glob(f"session_[0-9][0-9][0-9]/checkpoint_{scheme}_step_*.rst"):
+    match = re.fullmatch(rf"checkpoint_{re.escape(scheme)}_step_(\d{{9}})\.rst", path.name)
+    if match and path.is_file() and not path.is_symlink() and not path.parent.is_symlink():
+        candidates.append((int(match[1]), path))
+for step, path in sorted(candidates, reverse=True):
+    try:
+        if checked_step(path) != step:
+            raise ValueError("saved step differs from filename")
+    except (ValueError, OSError, struct.error, IndexError) as exc:
+        print(f"Checkpoint descartado ({exc}): {path}", file=sys.stderr)
+        continue
+    print(path)
+    break
+else:
+    if candidates:
+        sys.exit("No hay checkpoints válidos para reanudar este caso.")
+PY
 }
 
 next_session_name() {
@@ -507,7 +576,7 @@ run_case() {
     return 0
   fi
 
-  checkpoint="$(latest_checkpoint "$label")"
+  checkpoint="$(latest_checkpoint "$label")" || return 1
   if [[ -n "$checkpoint" ]]; then
     checkpoint="${checkpoint#"$CAMPAIGN_ROOT/"}"
     session="$(next_session_name "$label")"

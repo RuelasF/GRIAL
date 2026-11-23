@@ -10,6 +10,7 @@
 module equations
   use variables
   use metrics
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   private
   public :: prim_to_cons, cons_to_prim, calc_fluxes, calc_sources
@@ -107,7 +108,10 @@ contains
     real*8 :: local_D_floor, local_tau_floor
     real*8 :: g(3,3), ginv(3,3), sqg
     real*8 :: S_cov(3)
-    integer :: ii, jj
+    integer :: ii, jj, repair_event
+    logical :: finite_input(neq)
+    ! Binary64 exponent mask also detects signaling NaNs without raising INVALID.
+    integer(int64), parameter :: exponent_mask=int(z'7FF0000000000000',int64)
 #ifndef USE_OPENACC
     real*8 :: diagnostic_before(neq)
     if (do_numerical_diagnostics) then
@@ -124,21 +128,15 @@ contains
     local_D_floor   = rho_floor * sqg
     local_tau_floor = p_floor * (g1 - 1.0d0) * sqg
 
-    ! --- ESCUDO PRE-INVERSIÓN ---
+    repair_event=NUM_C2P_SANITIZE
+    do ii=1,neq
+      finite_input(ii)=iand(transfer(cons_state(ii),0_int64),exponent_mask)/=exponent_mask
+    end do
+    if (.not.all(finite_input)) goto 800
+
     if (cons_state(eq_de) <= local_D_floor) then
-#ifndef USE_OPENACC
-      call count_numerical_event(NUM_C2P_LOW_D)
-#endif
-      prim_state(eq_de) = rho_floor
-      prim_state(eq_pr) = p_floor
-      prim_state(eq_vx:eq_vz) = 0.0d0
-      cons_state(eq_de) = local_D_floor
-      cons_state(eq_pr) = local_tau_floor
-      cons_state(eq_vx:eq_vz) = 0.0d0
-#ifndef USE_OPENACC
-      if (do_numerical_diagnostics) call record_numerical_change(diagnostic_before,cons_state)
-#endif
-      return
+      repair_event=NUM_C2P_LOW_D
+      goto 800
     end if
 
     ! Momentos Covariantes Iniciales
@@ -153,8 +151,11 @@ contains
 
     ! --- ESCUDO DE CAUSALIDAD (LIMÍTE DEL CONO DE LUZ) ---
     E_tot = cons_state(eq_pr) + cons_state(eq_de)
+    if (.not.ieee_is_finite(E_tot).or..not.ieee_is_finite(S_sq)) goto 800
+    if (S_sq<0.0d0) goto 800
     ! E >= sqrt(D^2+S^2) is the admissibility bound, not a velocity cap.
     S_sq_max = max(0.0d0, (E_tot-cons_state(eq_de))*(E_tot+cons_state(eq_de)))
+    if (.not.ieee_is_finite(S_sq_max)) goto 800
 
     if (S_sq > S_sq_max .and. S_sq > 1.0d-20) then
 #ifndef USE_OPENACC
@@ -170,42 +171,14 @@ contains
     ! Asumimos que root_safe_newton recalcula S_sq internamente o usa cons_state actualizado
     W = root_safe_newton(cons_state, i, j, k)
 
-    ! --- ESCUDO DE FALLO DEL SOLUCIONADOR ---
-    if (W < 1.0d0) then
-#ifndef USE_OPENACC
-      call count_numerical_event(NUM_C2P_ROOT_FAIL)
-#endif
-      prim_state(eq_de) = rho_floor
-      prim_state(eq_pr) = p_floor
-      prim_state(eq_vx:eq_vz) = 0.0d0
+    repair_event=NUM_C2P_ROOT_FAIL
+    if (.not.ieee_is_finite(W)) goto 800
+    if (W<1.0d0) goto 800
 
-      cons_state(eq_de) = local_D_floor
-      cons_state(eq_pr) = local_tau_floor
-      cons_state(eq_vx:eq_vz) = 0.0d0
-#ifndef USE_OPENACC
-      if (do_numerical_diagnostics) call record_numerical_change(diagnostic_before,cons_state)
-#endif
-      return
-    end if
-
-    ! --- EXTRACCIÓN EXITOSA ---
     call eval_V_and_dV(W, cons_state, V, dV)
-
-    if (V <= 0.0d0 .or. isnan(V)) then
-#ifndef USE_OPENACC
-      call count_numerical_event(NUM_C2P_BAD_V)
-#endif
-      prim_state(eq_de) = rho_floor
-      prim_state(eq_pr) = p_floor
-      prim_state(eq_vx:eq_vz) = 0.0d0
-      cons_state(eq_de) = local_D_floor
-      cons_state(eq_pr) = local_tau_floor
-      cons_state(eq_vx:eq_vz) = 0.0d0
-#ifndef USE_OPENACC
-      if (do_numerical_diagnostics) call record_numerical_change(diagnostic_before,cons_state)
-#endif
-      return
-    end if
+    repair_event=NUM_C2P_BAD_V
+    if (.not.ieee_is_finite(V).or..not.ieee_is_finite(dV)) goto 800
+    if (V<=0.0d0) goto 800
 
     prim_state(eq_de) = cons_state(eq_de) / (W * sqg)
     ! Avoid subtracting two O(rho*W^2) quantities to recover small pressure.
@@ -217,7 +190,10 @@ contains
     prim_state(eq_vy) = (ginv(2,1)*cons_state(eq_vx) + ginv(2,2)*cons_state(eq_vy) + ginv(2,3)*cons_state(eq_vz)) / V
     prim_state(eq_vz) = (ginv(3,1)*cons_state(eq_vx) + ginv(3,2)*cons_state(eq_vy) + ginv(3,3)*cons_state(eq_vz)) / V
 
-    ! --- SANEAMIENTO FINAL ---
+    repair_event=NUM_C2P_SANITIZE
+    if (.not.all(ieee_is_finite(prim_state))) goto 800
+    if (prim_state(eq_de)<rho_floor.or.prim_state(eq_pr)<p_floor) goto 800
+
     v_sq_final = 0.0d0
     do ii = 1, 3
       do jj = 1, 3
@@ -225,23 +201,28 @@ contains
       end do
     end do
 
-    if (prim_state(eq_de) < rho_floor .or. prim_state(eq_pr) < p_floor .or. &
-        isnan(prim_state(eq_de)) .or. isnan(prim_state(eq_pr)) .or. &
-        isnan(prim_state(eq_vx)) .or. isnan(prim_state(eq_vy)) .or. isnan(prim_state(eq_vz)) .or. &
-        isnan(v_sq_final) .or. v_sq_final >= v_max) then
-#ifndef USE_OPENACC
-      call count_numerical_event(NUM_C2P_SANITIZE)
-#endif
-      prim_state(eq_de) = rho_floor
-      prim_state(eq_pr) = p_floor
-      prim_state(eq_vx:eq_vz) = 0.0d0
-
-      cons_state(eq_de) = local_D_floor
-      cons_state(eq_pr) = local_tau_floor
-      cons_state(eq_vx:eq_vz) = 0.0d0
-    end if
+    if (.not.ieee_is_finite(v_sq_final)) goto 800
+    if (v_sq_final>=v_max) goto 800
 #ifndef USE_OPENACC
     if (do_numerical_diagnostics) call record_numerical_change(diagnostic_before,cons_state)
+#endif
+    return
+
+800 continue
+    prim_state(eq_de) = rho_floor
+    prim_state(eq_pr) = p_floor
+    prim_state(eq_vx:eq_vz) = 0.0d0
+    cons_state(eq_de) = local_D_floor
+    cons_state(eq_pr) = local_tau_floor
+    cons_state(eq_vx:eq_vz) = 0.0d0
+#ifndef USE_OPENACC
+    call count_numerical_event(repair_event)
+    if (do_numerical_diagnostics) then
+      ! A nonfinite input has no defined conservative delta. Count the repair
+      ! and accumulate the change only for the finite input components.
+      where (.not.finite_input) diagnostic_before=cons_state
+      call record_numerical_change(diagnostic_before,cons_state)
+    end if
 #endif
   end subroutine cons_to_prim
 

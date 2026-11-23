@@ -1,7 +1,8 @@
 program test_primitive_recovery
   use variables
   use equations
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite, ieee_value, &
+    ieee_positive_inf, ieee_negative_inf, ieee_quiet_nan, ieee_signaling_nan
   implicit none
   real*8, parameter :: gammas(4)=(/4.0d0/3.0d0,1.4d0,5.0d0/3.0d0,2.0d0/)
   real*8, parameter :: densities(9)=(/1.0d-9,1.0d-7,1.0d-5,1.0d-3,0.1d0,1.0d0,1.0d2,1.0d4,1.0d6/)
@@ -138,5 +139,44 @@ program test_primitive_recovery
   call cons_to_prim(conserved,recovered,1,1,1)
   if (numerical_events(NUM_C2P_MOMENTUM)/=1) error stop 'invalid momentum not repaired'
   if (.not.all(ieee_is_finite(recovered)).or.minval(recovered(1:2))<=0.0d0) error stop 'invalid repair output'
+  call check_nonfinite_input()
   print *, 'PRIMITIVE RECOVERY TESTS PASSED; deliberate repairs tested separately'
+
+contains
+
+  subroutine check_nonfinite_input()
+    real*8 :: invalid(4), initial(neq), atmosphere(neq), expected_delta(neq)
+    integer :: field, kind
+
+    invalid(1)=ieee_value(0.0d0,ieee_positive_inf)
+    invalid(2)=ieee_value(0.0d0,ieee_negative_inf)
+    invalid(3)=ieee_value(0.0d0,ieee_quiet_nan)
+    invalid(4)=ieee_value(0.0d0,ieee_signaling_nan)
+    original=[1.0d0,0.2d0,0.1d0,-0.05d0,0.025d0]
+    call prim_to_cons(original,initial,1,1,1)
+    atmosphere=0.0d0
+    atmosphere(eq_de)=rho_floor*sqrt_gamma_c(1,1,1)
+    atmosphere(eq_pr)=p_floor*(g1-1.0d0)*sqrt_gamma_c(1,1,1)
+    do kind=1,size(invalid)
+      do field=1,neq
+        conserved=initial
+        conserved(field)=invalid(kind)
+        numerical_events=0_int64
+        numerical_delta_u=0.0d0
+        call cons_to_prim(conserved,recovered,1,1,1)
+        if (.not.all(ieee_is_finite(conserved)).or..not.all(ieee_is_finite(recovered))) &
+          error stop 'nonfinite input did not reach atmosphere'
+        if (any(conserved/=atmosphere)) error stop 'nonfinite input: wrong conservative atmosphere'
+        if (recovered(eq_de)/=rho_floor.or.recovered(eq_pr)/=p_floor.or.any(recovered(eq_vx:eq_vz)/=0.0d0)) &
+          error stop 'nonfinite input: wrong primitive atmosphere'
+        if (numerical_events(NUM_C2P_CALLS)/=1.or.numerical_events(NUM_C2P_SANITIZE)/=1.or. &
+            sum(numerical_events)/=2) error stop 'nonfinite input: wrong recovery counters'
+        expected_delta=atmosphere-initial
+        expected_delta(field)=0.0d0
+        if (.not.all(ieee_is_finite(numerical_delta_u))) error stop 'nonfinite input contaminated the budget'
+        if (any(numerical_delta_u/=expected_delta)) error stop 'nonfinite input: wrong finite-component budget'
+      end do
+    end do
+    print '(A,I0)', 'NONFINITE RECOVERY CASES PASSED: ',neq*size(invalid)
+  end subroutine check_nonfinite_input
 end program test_primitive_recovery

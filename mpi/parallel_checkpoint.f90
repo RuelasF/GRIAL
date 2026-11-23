@@ -10,6 +10,7 @@ module parallel_checkpoint
   use initialization, only: choose_numerical_architecture
   use metrics, only: set_metric_type
   use equations, only: cons_to_prim
+  use, intrinsic :: iso_fortran_env, only: error_unit
   use, intrinsic :: iso_c_binding, only: c_char,c_int,c_null_char
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
 #ifdef USE_MPI
@@ -320,20 +321,33 @@ contains
     if(bytes>=0)bytes=bytes+int(header,int64)
   end function expected_block_bytes
 
+  subroutine report_checkpoint_io(path,operation,status,message)
+    character(len=*), intent(in) :: path,operation,message
+    integer, intent(in) :: status
+    if(status/=0)write(error_unit,'(A,I0,5A,I0,2A)') &
+      'CHECKPOINT I/O rank=',parallel_rank,' ',operation,' ',trim(path),' iostat=',status,' ',trim(message)
+  end subroutine report_checkpoint_io
+
   subroutine write_block(path,layout,status)
     character(len=*), intent(in) :: path
     type(domain_layout), intent(in) :: layout
     integer, intent(out) :: status
     integer :: unit,close_status
-    open(newunit=unit,file=path,access='stream',form='unformatted',status='new',action='write',iostat=status)
-    if (status/=0) return
-    write(unit,iostat=status) BLOCK_MAGIC,ABI,layout%rank,layout%ranks,layout%global_shape, &
+    character(len=512) :: message
+    open(newunit=unit,file=path,access='stream',form='unformatted',status='new',action='write',iostat=status,iomsg=message)
+    if(status/=0)then
+      call report_checkpoint_io(path,'open',status,message)
+      return
+    end if
+    write(unit,iostat=status,iomsg=message) BLOCK_MAGIC,ABI,layout%rank,layout%ranks,layout%global_shape, &
       layout%local_shape,layout%offset,layout%process_shape,layout%halo, &
       [layout%periodic_x,layout%periodic_y],integration_time,dt,n_steps,perturbation_applied
-    if(status==0)write(unit,iostat=status) numerical_events,numerical_delta_u
-    if(status==0)write(unit,iostat=status) up,p(1:nx,1:ny,1:nz,:)
-    if(status==0)write(unit,iostat=status) END_MAGIC
-    close(unit,iostat=close_status)
+    if(status==0)write(unit,iostat=status,iomsg=message) numerical_events,numerical_delta_u
+    if(status==0)write(unit,iostat=status,iomsg=message) up,p(1:nx,1:ny,1:nz,:)
+    if(status==0)write(unit,iostat=status,iomsg=message) END_MAGIC
+    if(status/=0)call report_checkpoint_io(path,'write',status,message)
+    close(unit,iostat=close_status,iomsg=message)
+    if(close_status/=0)call report_checkpoint_io(path,'close',close_status,message)
     if(status==0)status=close_status
   end subroutine write_block
 
@@ -342,14 +356,20 @@ contains
     type(checkpoint_manifest), intent(in) :: manifest
     integer, intent(out) :: status
     integer :: unit,close_status
-    open(newunit=unit,file=path,access='stream',form='unformatted',status='new',action='write',iostat=status)
-    if(status/=0)return
-    write(unit,iostat=status) MANIFEST_MAGIC,ABI,manifest%global_shape,manifest%process_shape, &
+    character(len=512) :: message
+    open(newunit=unit,file=path,access='stream',form='unformatted',status='new',action='write',iostat=status,iomsg=message)
+    if(status/=0)then
+      call report_checkpoint_io(path,'open',status,message)
+      return
+    end if
+    write(unit,iostat=status,iomsg=message) MANIFEST_MAGIC,ABI,manifest%global_shape,manifest%process_shape, &
       manifest%halo,manifest%ranks,neq,manifest%periodic,manifest%time,manifest%step_size, &
       manifest%step,manifest%applied,manifest%configuration
-    if(status==0)write(unit,iostat=status) manifest%blocks
-    if(status==0)write(unit,iostat=status) END_MAGIC
-    close(unit,iostat=close_status)
+    if(status==0)write(unit,iostat=status,iomsg=message) manifest%blocks
+    if(status==0)write(unit,iostat=status,iomsg=message) END_MAGIC
+    if(status/=0)call report_checkpoint_io(path,'write',status,message)
+    close(unit,iostat=close_status,iomsg=message)
+    if(close_status/=0)call report_checkpoint_io(path,'close',close_status,message)
     if(status==0)status=close_status
   end subroutine write_manifest
 
@@ -363,7 +383,7 @@ contains
     integer(int64) :: signature(2),descriptor(9),manifest_signature(2)
     integer(int64) :: checked_events(NUM_EVENT_COUNT),checked_signature(2)
     real*8 :: checked_delta(neq)
-    character(len=512) :: name
+    character(len=512) :: name,message
     integer :: ios,unit,close_status,manifest_header
     logical :: ok
 #ifdef USE_MPI
@@ -384,27 +404,40 @@ contains
     ok=io_agreement(ios==0)
     if(.not.ok)goto 900
     if(parallel_rank==0)then
-      open(newunit=unit,file=trim(path)//'/configuration.bin',status='new',access='stream', &
-        form='unformatted',action='write',iostat=ios)
+      name=trim(path)//'/configuration.bin'
+      open(newunit=unit,file=trim(name),status='new',access='stream', &
+        form='unformatted',action='write',iostat=ios,iomsg=message)
       if(ios==0)then
-        write(unit,iostat=ios)configuration
-        close(unit,iostat=close_status)
+        write(unit,iostat=ios,iomsg=message)configuration
+        if(ios/=0)call report_checkpoint_io(name,'write',ios,message)
+        close(unit,iostat=close_status,iomsg=message)
+        if(close_status/=0)call report_checkpoint_io(name,'close',close_status,message)
         if(ios==0)ios=close_status
+      else
+        call report_checkpoint_io(name,'open',ios,message)
       end if
     end if
     ok=io_agreement(ios==0)
     if(.not.ok)goto 900
-    call file_signature(trim(path)//'/configuration.bin',signature,ios)
+    name=trim(path)//'/configuration.bin'
+    call file_signature(trim(name),signature,ios)
     if(ios==0)then
       if(any(signature/=[int(size(configuration),int64),checkpoint_crc64(configuration)]))ios=1
     end if
+    if(ios/=0)call report_checkpoint_io(name,'verify',ios,'configuration size or checksum could not be verified')
     ok=io_agreement(ios==0)
     if(.not.ok)goto 900
     name=block_path(path,parallel_rank)
     call write_block(trim(name),layout,ios)
-    if(ios==0)call file_signature(trim(name),signature,ios)
     if(ios==0)then
-      if(signature(1)/=expected_block_bytes(layout))ios=1
+      call file_signature(trim(name),signature,ios)
+      if(ios==0.and.signature(1)/=expected_block_bytes(layout))then
+        ios=1
+        write(message,'(A,I0,A,I0)') 'block size ',signature(1),', expected ',expected_block_bytes(layout)
+      else
+        message='could not read block signature'
+      end if
+      if(ios/=0)call report_checkpoint_io(name,'verify',ios,message)
     end if
     ok=io_agreement(ios==0)
     if(.not.ok)goto 900
@@ -423,6 +456,7 @@ contains
       if(.not.all(checked_u==up).or..not.all(checked_p==p(1:nx,1:ny,1:nz,:)).or. &
         any(checked_events/=numerical_events).or.any(checked_delta/=numerical_delta_u))ios=1
     end if
+    if(ios/=0)call report_checkpoint_io(name,'verify',ios,'block readback failed')
     ok=io_agreement(ios==0)
     if(.not.ok)goto 900
     deallocate(checked_u,checked_p)
@@ -445,12 +479,17 @@ contains
           int(storage_size(0_int64)/8,int64)*size(manifest%blocks,kind=int64))ios=1
       end if
       if(ios==0)then
-        open(newunit=unit,file=trim(path)//'/COMMITTED.tmp',status='new',access='stream', &
-          form='unformatted',action='write',iostat=ios)
+        name=trim(path)//'/COMMITTED.tmp'
+        open(newunit=unit,file=trim(name),status='new',access='stream', &
+          form='unformatted',action='write',iostat=ios,iomsg=message)
         if(ios==0)then
-          write(unit,iostat=ios) COMMIT_MAGIC,manifest_signature,END_MAGIC
-          close(unit,iostat=close_status)
+          write(unit,iostat=ios,iomsg=message) COMMIT_MAGIC,manifest_signature,END_MAGIC
+          if(ios/=0)call report_checkpoint_io(name,'write',ios,message)
+          close(unit,iostat=close_status,iomsg=message)
+          if(close_status/=0)call report_checkpoint_io(name,'close',close_status,message)
           if(ios==0)ios=close_status
+        else
+          call report_checkpoint_io(name,'open',ios,message)
         end if
         if(ios==0)call read_commit(trim(path)//'/COMMITTED.tmp',checked_signature,ios)
         if(ios==0)then

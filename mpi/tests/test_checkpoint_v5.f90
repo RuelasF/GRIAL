@@ -13,7 +13,8 @@ program test_checkpoint_v5
   character(len=*), parameter :: checkpoint_file = &
     '/tmp/grial_mpi_checkpoint_v8_test/checkpoint_checkpoint_test_step_000000073.rst'
 
-  ! Fault probe: the Python control supplies RLIMIT_FSIZE and ignores SIGXFSZ.
+  ! The Python control supplies RLIMIT_FSIZE. GNU Fortran installs a startup
+  ! handler for Linux SIGXFSZ, so ignore it here to exercise the returned error.
   if(command_argument_count()==2) then
     call get_command_argument(1,argument)
     if(trim(argument)/='--rewrite-failure') error stop 'Unknown checkpoint probe mode'
@@ -23,6 +24,7 @@ program test_checkpoint_v5
     allocate(up(nx,ny,nz,neq))
     call read_checkpoint_state(unit_file,step_read,time_read)
     close(unit_file)
+    call signal(25,1)
     call save_checkpoint(step_read,time_read,io_status)
     if(io_status==0) error stop 'Expected limited-file write to fail'
     print *, 'CHECKPOINT WRITE FAILURE HANDLED'

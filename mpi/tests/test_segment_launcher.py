@@ -113,15 +113,18 @@ shock_sensor=true
     assert invoke([str(exe),str(par)],'cold').returncode==0
     status=dict(line.split('=',1) for line in (out/'data/run_status.dat').read_text().splitlines())
     cp=out/status['checkpoint'];before=hashlib.sha256(cp.read_bytes()).hexdigest()
-    def limit_file_size():
+    def limit_file_size(size):
         signal.signal(signal.SIGXFSZ,signal.SIG_IGN)
         resource.setrlimit(resource.RLIMIT_CORE,(0,0))
-        resource.setrlimit(resource.RLIMIT_FSIZE,(4096,4096))
-    failed=invoke([str(probe),'--rewrite-failure',str(cp)],'limited_write',preexec_fn=limit_file_size)
-    assert failed.returncode in (0,-signal.SIGXFSZ),(failed.stdout,failed.stderr)
-    if failed.returncode==0:assert b'CHECKPOINT WRITE FAILURE HANDLED' in failed.stdout
-    assert hashlib.sha256(cp.read_bytes()).hexdigest()==before
-    partial=Path(str(cp)+'.tmp');assert partial.exists() and partial.stat().st_size<=4096
+        resource.setrlimit(resource.RLIMIT_FSIZE,(size,size))
+    partial=Path(str(cp)+'.tmp')
+    for limit in (4096,cp.stat().st_size-1):
+        failed=invoke([str(probe),'--rewrite-failure',str(cp)],f'limited_write_{limit}',
+                      preexec_fn=lambda: limit_file_size(limit))
+        assert failed.returncode==0,(failed.stdout,failed.stderr)
+        assert b'CHECKPOINT WRITE FAILURE HANDLED' in failed.stdout
+        assert hashlib.sha256(cp.read_bytes()).hexdigest()==before
+        assert partial.exists() and 0<partial.stat().st_size<=limit
     restart=out/'restart.par';restart.write_text(f'restart=true\nrestart_file={cp}\n')
     assert invoke([str(exe),'--check',str(restart)],'valid_generation').returncode==0
     bad=out/'partial.par';bad.write_text(f'restart=true\nrestart_file={partial}\n')

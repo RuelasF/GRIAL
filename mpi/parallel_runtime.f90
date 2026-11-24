@@ -20,8 +20,9 @@ module parallel_runtime
 #endif
 #ifdef GRIAL_PROFILE
   public :: profile_reset, profile_add, profile_report, profile_clock, profile_label_add
-  real*8 :: profile_seconds(9)=0.0d0
-  integer :: profile_calls(9)=0
+  integer, parameter, public :: profile_halo_copy=10, profile_halo_radial=11, profile_halo_polar=12
+  real*8 :: profile_seconds(profile_halo_polar)=0.0d0
+  integer :: profile_calls(profile_halo_polar)=0
   character(len=160) :: profile_labels(256)=""
   real*8 :: profile_label_seconds(256)=0.0d0
   integer :: profile_label_calls(256)=0
@@ -101,9 +102,10 @@ contains
     integer :: i,unit,ios,close_status
     character(len=80) :: trace_name
     character(len=:), allocatable :: trace_path
-    character(len=16),parameter :: names(9)=[character(len=16) :: 'cfl','rhs','recovery','halos', &
-      'observer','validate_mpi','reconstruct','riemann_loop','source_assembly']
-    do i=1,9
+    character(len=16),parameter :: names(profile_halo_polar)=[character(len=16) :: 'cfl','rhs','recovery','halos', &
+      'observer','validate_mpi','reconstruct','riemann_loop','source_assembly', &
+      'halo_copy','halo_radial','halo_polar']
+    do i=1,size(names)
       write(*,'(A,I0,1X,A,1X,I0,1X,ES24.16E3)') 'GRIAL_PROFILE rank=',parallel_rank, &
         trim(names(i)),profile_calls(i),profile_seconds(i)
     end do

@@ -727,7 +727,7 @@ contains
 
     real*8 :: max_vx, max_vy, max_vz, global_maxima(3)
     real*8 :: local_vx, local_vy, local_vz, alpha, beta(3), ginv(3,3)
-    integer :: i, j, k, invalid_cfl_cells
+    integer :: i, j, invalid_cfl_cells
     logical :: active_y,active_z,cache_ok
 
 #ifdef GRIAL_CFL_CACHE
@@ -769,64 +769,63 @@ contains
 
     ! Cotas causales máximas en cada dirección. El cono de luz es una cota
     ! segura tanto para GRHD como para las futuras ondas rápidas de GRMHD.
-    !$OMP PARALLEL DO PRIVATE(i, j, k, alpha, beta, ginv, local_vx, local_vy, local_vz) &
-    !$OMP REDUCTION(max:max_vx, max_vy, max_vz) REDUCTION(+:invalid_cfl_cells) COLLAPSE(3)
-    !$ACC PARALLEL LOOP COLLAPSE(3) REDUCTION(MAX:max_vx,max_vy,max_vz) &
+    ! La geometria estacionaria es identica en todos los planos k.
+    !$OMP PARALLEL DO PRIVATE(i, j, alpha, beta, ginv, local_vx, local_vy, local_vz) &
+    !$OMP REDUCTION(max:max_vx, max_vy, max_vz) REDUCTION(+:invalid_cfl_cells) COLLAPSE(2)
+    !$ACC PARALLEL LOOP COLLAPSE(2) REDUCTION(MAX:max_vx,max_vy,max_vz) &
     !$ACC& REDUCTION(+:invalid_cfl_cells) PRESENT(alpha_c,beta_c,gamma_inv_c) &
     !$ACC& PRIVATE(alpha,beta,ginv,local_vx,local_vy,local_vz) FIRSTPRIVATE(active_y,active_z)
-    do k = 1, nz
-      do j = 1, ny
-        do i = 1, nx
+    do j = 1, ny
+      do i = 1, nx
 
-          ! Leer métrica INVERSA (contravariante) en el centro de la celda
-          alpha    = alpha_c(i,j)
-          beta(:)  = beta_c(:,i,j)
-          ginv(:,:) = gamma_inv_c(:,:,i,j) ! gamma^ij
+        ! Leer métrica INVERSA (contravariante) en el centro de la celda
+        alpha    = alpha_c(i,j)
+        beta(:)  = beta_c(:,i,j)
+        ginv(:,:) = gamma_inv_c(:,:,i,j) ! gamma^ij
 
-          ! Stage finite/positive checks: Fortran logical expressions need not short-circuit.
-          if (.not.ieee_is_finite(alpha).or..not.all(ieee_is_finite(beta)).or. &
-              .not.ieee_is_finite(ginv(1,1))) then
+        ! Stage finite/positive checks: Fortran logical expressions need not short-circuit.
+        if (.not.ieee_is_finite(alpha).or..not.all(ieee_is_finite(beta)).or. &
+            .not.ieee_is_finite(ginv(1,1))) then
+          invalid_cfl_cells=invalid_cfl_cells+1
+          cycle
+        end if
+        if (alpha<=0.0d0.or.ginv(1,1)<=0.0d0) then
+          invalid_cfl_cells=invalid_cfl_cells+1
+          cycle
+        end if
+        if (active_y) then
+          if (.not.ieee_is_finite(ginv(2,2))) then
             invalid_cfl_cells=invalid_cfl_cells+1
             cycle
           end if
-          if (alpha<=0.0d0.or.ginv(1,1)<=0.0d0) then
+          if (ginv(2,2)<=0.0d0) then
             invalid_cfl_cells=invalid_cfl_cells+1
             cycle
           end if
-          if (active_y) then
-            if (.not.ieee_is_finite(ginv(2,2))) then
-              invalid_cfl_cells=invalid_cfl_cells+1
-              cycle
-            end if
-            if (ginv(2,2)<=0.0d0) then
-              invalid_cfl_cells=invalid_cfl_cells+1
-              cycle
-            end if
+        end if
+        if (active_z) then
+          if (.not.ieee_is_finite(ginv(3,3))) then
+            invalid_cfl_cells=invalid_cfl_cells+1
+            cycle
           end if
-          if (active_z) then
-            if (.not.ieee_is_finite(ginv(3,3))) then
-              invalid_cfl_cells=invalid_cfl_cells+1
-              cycle
-            end if
-            if (ginv(3,3)<=0.0d0) then
-              invalid_cfl_cells=invalid_cfl_cells+1
-              cycle
-            end if
+          if (ginv(3,3)<=0.0d0) then
+            invalid_cfl_cells=invalid_cfl_cells+1
+            cycle
           end if
+        end if
 
-          ! Límite Causal Absoluto Físico (Cono de Luz Coordenado: ds^2 = 0)
-          ! La velocidad coordenada de la luz en Kerr usa el componente gamma^ii
-          local_vx = alpha * sqrt(ginv(1,1)) + abs(beta(1))
-          max_vx = max(max_vx, local_vx)
-          if (active_y) then
-            local_vy = alpha * sqrt(ginv(2,2)) + abs(beta(2))
-            max_vy = max(max_vy, local_vy)
-          end if
-          if (active_z) then
-            local_vz = alpha * sqrt(ginv(3,3)) + abs(beta(3))
-            max_vz = max(max_vz, local_vz)
-          end if
-        end do
+        ! Límite Causal Absoluto Físico (Cono de Luz Coordenado: ds^2 = 0)
+        ! La velocidad coordenada de la luz en Kerr usa el componente gamma^ii
+        local_vx = alpha * sqrt(ginv(1,1)) + abs(beta(1))
+        max_vx = max(max_vx, local_vx)
+        if (active_y) then
+          local_vy = alpha * sqrt(ginv(2,2)) + abs(beta(2))
+          max_vy = max(max_vy, local_vy)
+        end if
+        if (active_z) then
+          local_vz = alpha * sqrt(ginv(3,3)) + abs(beta(3))
+          max_vz = max(max_vz, local_vz)
+        end if
       end do
     end do
     !$OMP END PARALLEL DO

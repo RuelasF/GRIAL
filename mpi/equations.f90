@@ -242,34 +242,17 @@ contains
     dV = (g1 * W * (cons_state(eq_de) * W - 2.0d0 * (cons_state(eq_pr) + cons_state(eq_de))) + cons_state(eq_de)) / denom**2
   end subroutine eval_V_and_dV
 
-  ! Define la función residual fn(W) que debe ser 0, y su jacobiano dfn/dW.
-  subroutine eval_residual(W, cons_state, i, j, k, residual, d_residual)
+  ! Residual adimensional fn(W) y su derivada, a estado conservado fijo.
+  subroutine eval_residual(W, cons_state, state_scale, scaled_momentum_sq, residual, d_residual)
     !$acc routine seq
-    implicit none
-    real*8, intent(in)  :: W, cons_state(:)
-    integer, intent(in) :: i, j, k
+    real*8, intent(in) :: W, cons_state(:), state_scale, scaled_momentum_sq
     real*8, intent(out) :: residual, d_residual
-    real*8 :: V, dV, Q_sq, ginv(3,3), state_scale
-    integer :: ii, jj
+    real*8 :: V, dV
 
-    ! Se lee la métrica inversa localmente desde la caché
-    ginv(:,:) = gamma_inv_c(:,:,i,j)
     call eval_V_and_dV(W, cons_state, V, dV)
-
-    ! Cuadrado del Momento Covariante generalizado (Q^2 = gamma^ij S_i S_j)
-    Q_sq = 0.0d0
-    do ii = 1, 3
-      do jj = 1, 3
-        ! cons_state(eq_vx+0) = S_1, cons_state(eq_vx+1) = S_2, cons_state(eq_vx+2) = S_3
-        Q_sq = Q_sq + ginv(ii,jj) * cons_state(eq_vx + ii - 1) * cons_state(eq_vx + jj - 1)
-      end do
-    end do
-
-    ! Dimensionless residual keeps root tolerances independent of density units.
-    state_scale=max(abs(cons_state(eq_pr)+cons_state(eq_de)),cons_state(eq_de),tiny(1.0d0))
     V=V/state_scale
     dV=dV/state_scale
-    residual   = V**2 * (1.0d0 - 1.0d0/W**2) - Q_sq/state_scale**2
+    residual   = V**2 * (1.0d0 - 1.0d0/W**2) - scaled_momentum_sq
     d_residual = 2.0d0 * V * (dV * (W**3 - W) + V) / (W**3)
   end subroutine eval_residual
 
@@ -288,33 +271,34 @@ contains
     real*8 :: df, diff_x, diff_x_old, f, f_high, f_low, temp, x_high, x_low
     logical :: converged
 
-    ! Variables para la cota dinámica superior
-    real*8 :: S_sq_local, W_max_guess, ginv_local(3,3)
+    real*8 :: momentum_sq, state_scale, scaled_momentum_sq, W_max_guess
+    real*8 :: ginv(3,3)
+
+    ! El estado conservado permanece fijo durante Newton y Brent.
+    ginv(:,:) = gamma_inv_c(:,:,i,j)
+    momentum_sq = 0.0d0
+    do ii = 1, 3
+      do jj = 1, 3
+        momentum_sq = momentum_sq + ginv(ii,jj) * cons_state(eq_vx+ii-1) * cons_state(eq_vx+jj-1)
+      end do
+    end do
+    state_scale = max(abs(cons_state(eq_pr)+cons_state(eq_de)),cons_state(eq_de),tiny(1.0d0))
+    scaled_momentum_sq = momentum_sq / state_scale**2
 
     if (present(x1_in)) then ; x1 = x1_in ; else ; x1 = 1.0d0 ; end if
 
     if (present(x2_in)) then
       x2 = x2_in
     else
-      ! --- COTA SUPERIOR DINÁMICA DE W ---
-      ginv_local(:,:) = gamma_inv_c(:,:,i,j)
-
-      S_sq_local = 0.0d0
-      do ii = 1, 3
-        do jj = 1, 3
-          S_sq_local = S_sq_local + ginv_local(ii,jj) * cons_state(eq_vx + ii - 1) * cons_state(eq_vx + jj - 1)
-        end do
-      end do
-
-      W_max_guess = (sqrt(S_sq_local) + cons_state(eq_de)) / max(cons_state(eq_de), rho_floor)
-      x2 = max(1.0d3, W_max_guess * 2.0d0) ! Límite dinámico blindado
+      W_max_guess = (sqrt(momentum_sq) + cons_state(eq_de)) / max(cons_state(eq_de), rho_floor)
+      x2 = max(1.0d3, W_max_guess * 2.0d0)
     end if
 
     x_low = x1; x_high = x2
     converged = .false.
 
-    call eval_residual(x1, cons_state, i, j, k, f_low, df)
-    call eval_residual(x2, cons_state, i, j, k, f_high, df)
+    call eval_residual(x1, cons_state, state_scale, scaled_momentum_sq, f_low, df)
+    call eval_residual(x2, cons_state, state_scale, scaled_momentum_sq, f_high, df)
 
     if (abs(f_low) < 1.0d-14) then
       root = x_low ; return
@@ -333,7 +317,7 @@ contains
     root = 0.5d0 * (x1 + x2)
     diff_x_old = abs(x2 - x1)
     diff_x = diff_x_old
-    call eval_residual(root, cons_state, i, j, k, f, df)
+    call eval_residual(root, cons_state, state_scale, scaled_momentum_sq, f, df)
 
     do iter_j = 1, MAX_ITER
       if (((root - x_high)*df - f)*((root - x_low)*df - f) > 0.0d0 .or. &
@@ -355,7 +339,7 @@ contains
         return
       end if
 
-      call eval_residual(root, cons_state, i, j, k, f, df)
+      call eval_residual(root, cons_state, state_scale, scaled_momentum_sq, f, df)
 
       if (f < 0.0d0) then
         x_low = root
@@ -365,42 +349,31 @@ contains
     end do
 
     if (.not. converged .or. abs(f) > 1.0d-6) then
-      root = root_brent(cons_state, i, j, k)
+      root = root_brent(cons_state, momentum_sq, state_scale, scaled_momentum_sq)
     end if
   end function root_safe_newton
 
   ! Método de Brent
-  function root_brent(cons_state, i, j, k) result(root)
+  function root_brent(cons_state, momentum_sq, state_scale, scaled_momentum_sq) result(root)
     !$acc routine seq
     implicit none
     real*8, intent(in) :: cons_state(:)
-    integer, intent(in) :: i, j, k
+    real*8, intent(in) :: momentum_sq, state_scale, scaled_momentum_sq
     real*8 :: x2
     real*8, parameter :: x1 = 1.0d0, x_acc = 1.0d-12
     real*8 :: root
     integer, parameter :: MAX_ITER = 100
     real*8, parameter :: EPS = epsilon(1.0d0)
-    integer :: iter, ii, jj
+    integer :: iter
     real*8 :: a, b, c, d, e, fa, fb, fc, o, q, r, y1, tol1, xm, df
 
-    ! Variables para la cota dinámica superior
-    real*8 :: S_sq_local, W_max_guess, ginv_local(3,3)
+    real*8 :: W_max_guess
 
-    ! --- COTA SUPERIOR DINÁMICA DE W ---
-    ginv_local(:,:) = gamma_inv_c(:,:,i,j)
-
-    S_sq_local = 0.0d0
-    do ii = 1, 3
-      do jj = 1, 3
-        S_sq_local = S_sq_local + ginv_local(ii,jj) * cons_state(eq_vx + ii - 1) * cons_state(eq_vx + jj - 1)
-      end do
-    end do
-
-    W_max_guess = (sqrt(S_sq_local) + cons_state(eq_de)) / max(cons_state(eq_de), rho_floor)
+    W_max_guess = (sqrt(momentum_sq) + cons_state(eq_de)) / max(cons_state(eq_de), rho_floor)
     x2 = max(1.0d4, W_max_guess * 2.0d0) ! Límite dinámico blindado para Brent
 
-    call eval_residual(x1, cons_state, i, j, k, fa, df)
-    call eval_residual(x2, cons_state, i, j, k, fb, df)
+    call eval_residual(x1, cons_state, state_scale, scaled_momentum_sq, fa, df)
+    call eval_residual(x2, cons_state, state_scale, scaled_momentum_sq, fb, df)
 
     if (sign(1.0d0, fa) * sign(1.0d0, fb) > 0.0d0) then
       root = -1.0d0 ; return
@@ -449,7 +422,7 @@ contains
       else
         b = b + sign(tol1, xm)
       end if
-      call eval_residual(b, cons_state, i, j, k, fb, df)
+      call eval_residual(b, cons_state, state_scale, scaled_momentum_sq, fb, df)
     end do
 
     root = -1.0d0 ! Time-out irrecuperable

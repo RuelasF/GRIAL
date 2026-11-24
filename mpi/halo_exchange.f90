@@ -180,6 +180,9 @@ contains
 #ifdef USE_MPI
     integer :: status,received_count
     type(MPI_Status) :: receipt
+#ifdef GRIAL_PROFILE
+    real*8 :: halo_started
+#endif
 #endif
 
     call parallel_require_active()
@@ -201,25 +204,61 @@ contains
       return
     end if
 #ifdef USE_MPI
+#ifdef GRIAL_PROFILE
+    halo_started=profile_clock()
+#endif
     send_buffer=q_state(1:nghost,1:ny,1:nz,:)
+#ifdef GRIAL_PROFILE
+    call profile_add(profile_halo_copy,halo_started)
+#endif
+#ifdef GRIAL_PROFILE
+    halo_started=profile_clock()
+#endif
     call MPI_Sendrecv(send_buffer,buffer_count,MPI_DOUBLE_PRECISION,lower_peer,201, &
                       receive_buffer,buffer_count,MPI_DOUBLE_PRECISION,upper_peer,201,MPI_COMM_WORLD,receipt,status)
+#ifdef GRIAL_PROFILE
+    call profile_add(profile_halo_radial,halo_started)
+#endif
     call parallel_check_mpi(status,'halo left send/right receive')
     if (upper_peer/=MPI_PROC_NULL) then
       call MPI_Get_count(receipt,MPI_DOUBLE_PRECISION,received_count,status)
       call parallel_check_mpi(status,'halo right received count')
       if (received_count/=buffer_count) call parallel_abort('incomplete right halo slab')
+#ifdef GRIAL_PROFILE
+      halo_started=profile_clock()
+#endif
       q_state(nx+1:nx+nghost,1:ny,1:nz,:)=receive_buffer
+#ifdef GRIAL_PROFILE
+      call profile_add(profile_halo_copy,halo_started)
+#endif
     end if
+#ifdef GRIAL_PROFILE
+    halo_started=profile_clock()
+#endif
     send_buffer=q_state(nx-nghost+1:nx,1:ny,1:nz,:)
+#ifdef GRIAL_PROFILE
+    call profile_add(profile_halo_copy,halo_started)
+#endif
+#ifdef GRIAL_PROFILE
+    halo_started=profile_clock()
+#endif
     call MPI_Sendrecv(send_buffer,buffer_count,MPI_DOUBLE_PRECISION,upper_peer,202, &
                       receive_buffer,buffer_count,MPI_DOUBLE_PRECISION,lower_peer,202,MPI_COMM_WORLD,receipt,status)
+#ifdef GRIAL_PROFILE
+    call profile_add(profile_halo_radial,halo_started)
+#endif
     call parallel_check_mpi(status,'halo right send/left receive')
     if (lower_peer/=MPI_PROC_NULL) then
       call MPI_Get_count(receipt,MPI_DOUBLE_PRECISION,received_count,status)
       call parallel_check_mpi(status,'halo left received count')
       if (received_count/=buffer_count) call parallel_abort('incomplete left halo slab')
+#ifdef GRIAL_PROFILE
+      halo_started=profile_clock()
+#endif
       q_state(1-nghost:0,1:ny,1:nz,:)=receive_buffer
+#ifdef GRIAL_PROFILE
+      call profile_add(profile_halo_copy,halo_started)
+#endif
     end if
 #endif
   end subroutine exchange_primitive_halos
@@ -365,25 +404,64 @@ contains
 #ifdef USE_MPI
     integer :: status,received_count
     type(MPI_Status) :: receipt
+#ifdef GRIAL_PROFILE
+    real*8 :: halo_started
+#endif
+#ifdef GRIAL_PROFILE
+    halo_started=profile_clock()
+#endif
     polar_send=q_state(1-nghost:nx+nghost,1:nghost,1:nz,:)
+#ifdef GRIAL_PROFILE
+    call profile_add(profile_halo_copy,halo_started)
+#endif
+#ifdef GRIAL_PROFILE
+    halo_started=profile_clock()
+#endif
     call MPI_Sendrecv(polar_send,polar_count,MPI_DOUBLE_PRECISION,lower_polar,211, &
       polar_receive,polar_count,MPI_DOUBLE_PRECISION,upper_polar,211,MPI_COMM_WORLD,receipt,status)
+#ifdef GRIAL_PROFILE
+    call profile_add(profile_halo_polar,halo_started)
+#endif
     call parallel_check_mpi(status,'polar lower send/upper receive')
     if (upper_polar/=MPI_PROC_NULL) then
       call MPI_Get_count(receipt,MPI_DOUBLE_PRECISION,received_count,status)
       call parallel_check_mpi(status,'polar upper received count')
       if (received_count/=polar_count) call parallel_abort('incomplete upper polar halo')
+#ifdef GRIAL_PROFILE
+      halo_started=profile_clock()
+#endif
       q_state(1-nghost:nx+nghost,ny+1:ny+nghost,1:nz,:)=polar_receive
+#ifdef GRIAL_PROFILE
+      call profile_add(profile_halo_copy,halo_started)
+#endif
     end if
+#ifdef GRIAL_PROFILE
+    halo_started=profile_clock()
+#endif
     polar_send=q_state(1-nghost:nx+nghost,ny-nghost+1:ny,1:nz,:)
+#ifdef GRIAL_PROFILE
+    call profile_add(profile_halo_copy,halo_started)
+#endif
+#ifdef GRIAL_PROFILE
+    halo_started=profile_clock()
+#endif
     call MPI_Sendrecv(polar_send,polar_count,MPI_DOUBLE_PRECISION,upper_polar,212, &
       polar_receive,polar_count,MPI_DOUBLE_PRECISION,lower_polar,212,MPI_COMM_WORLD,receipt,status)
+#ifdef GRIAL_PROFILE
+    call profile_add(profile_halo_polar,halo_started)
+#endif
     call parallel_check_mpi(status,'polar upper send/lower receive')
     if (lower_polar/=MPI_PROC_NULL) then
       call MPI_Get_count(receipt,MPI_DOUBLE_PRECISION,received_count,status)
       call parallel_check_mpi(status,'polar lower received count')
       if (received_count/=polar_count) call parallel_abort('incomplete lower polar halo')
+#ifdef GRIAL_PROFILE
+      halo_started=profile_clock()
+#endif
       q_state(1-nghost:nx+nghost,1-nghost:0,1:nz,:)=polar_receive
+#ifdef GRIAL_PROFILE
+      call profile_add(profile_halo_copy,halo_started)
+#endif
     end if
 #endif
   end subroutine exchange_polar_halos

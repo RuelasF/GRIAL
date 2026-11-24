@@ -68,6 +68,10 @@ de tiempo calculado sobre la geometría fija. La opción viene desactivada y
 agrega el sufijo `_cfl_cache` al ejecutable. `PROFILE=1` construye el perfilador
 `grial_mpi_profile` y requiere `OVERLAP=0`.
 
+El perfil separa la copia de capas (`halo_copy`) de los intervalos dentro de
+`MPI_Sendrecv` radial y polar (`halo_radial` y `halo_polar`). Estos intervalos
+forman parte de `halos` e incluyen la espera del vecino.
+
 Con el perfilador activo, `GRIAL_COLLECTIVE_TRACE=1` escribe
 `grial_collectives_step_<inicio>_rank_<rango>.tsv` junto a los diagnósticos de
 la corrida. El nombre usa el paso inicial de la sesión. Si la traza ya existe
